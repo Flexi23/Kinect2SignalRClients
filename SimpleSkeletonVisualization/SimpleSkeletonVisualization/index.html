@@ -1,0 +1,126 @@
+﻿<html>
+<head>
+	<title>SimpleSkeletonVisualization</title>
+	<style type="text/css">
+		body {
+			background-color: #333;
+			color: #bbb;
+			margin: 0;
+			overflow: hidden;
+		}
+
+		canvas {
+			display: block;
+			outline: 0px;
+			margin-bottom: 1.5em;
+		}
+	</style>
+	<script src="processing.js" type="text/javascript"></script>
+	<script src="../Scripts/jquery-1.6.4.min.js"></script>
+	<script src="../Scripts/jquery.signalR-2.0.3.min.js"></script>
+	<script src="http://localhost:8080/signalr/hubs"></script>
+	<script type="text/javascript">
+		processingInstance = null;
+
+		var TrackingIds = [];
+		var bodies = [];
+
+		function setBody(body) {
+			if (TrackingIds.indexOf(body.TrackingId) == -1) {
+				TrackingIds.push(body.TrackingId);
+			}
+			bodies[body.TrackingId] = body;
+		}
+
+		$(function () {
+			$.connection.hub.url = "http://localhost:8080/signalr";
+			var kinect = $.connection.kinectHub;
+
+			kinect.client.onBody = function (bodyJson, projectionMappedPointsJson) {
+				body = JSON.parse(bodyJson);
+				body.points2D = JSON.parse(projectionMappedPointsJson);
+
+				body.handRight = { "prevX": -1, "prevY": -1, "grab": false, "point": false, "object": null };
+				switch (body.handRight.state = body.HandRightState) {
+					case 3:
+						body.handRight.grab = true;
+						break;
+					case 4:
+						body.handRight.point = true;
+						break;
+				}
+
+				if (body.handRight.grab) {
+					body.handRight.x = (body.points2D["HandTipRight"][0] * 2 + body.points2D["HandRight"][0] + body.points2D["ThumbRight"][0] * 2) / 5;
+					body.handRight.y = (body.points2D["HandTipRight"][1] * 2 + body.points2D["HandRight"][1] + body.points2D["ThumbRight"][1] * 2) / 5;
+				} else if (body.handRight.point) {
+					body.handRight.x = body.points2D["HandTipRight"][0];
+					body.handRight.y = body.points2D["HandTipRight"][1];
+				}
+
+				body.handLeft = { "prevX": -1, "prevY": -1, "grab": false, "point": false, "object": null };
+				switch (body.handLeft.state = body.HandLeftState) {
+					case 3:
+						body.handLeft.grab = true;
+						break;
+					case 4:
+						body.handLeft.point = true;
+						break;
+				}
+
+				if (body.handLeft.grab) {
+					body.handLeft.x = (body.points2D["HandTipLeft"][0] * 2 + body.points2D["HandLeft"][0] + body.points2D["ThumbLeft"][0] * 2) / 5;
+					body.handLeft.y = (body.points2D["HandTipLeft"][1] * 2 + body.points2D["HandLeft"][1] + body.points2D["ThumbLeft"][1] * 2) / 5;
+				} else if (body.handLeft.point) {
+					body.handLeft.x = body.points2D["HandTipLeft"][0];
+					body.handLeft.y = body.points2D["HandTipLeft"][1];
+				}
+
+				if (!processingInstance) {
+					processingInstance = Processing.getInstanceById('simpleSkeletonVisualization');
+				}
+
+				if (TrackingIds.indexOf(body.TrackingId) == -1) {
+					TrackingIds.push(body.TrackingId);
+				} else {
+					var oldBody = bodies[body.TrackingId];
+					body.handRight.prevX = oldBody.handRight.x;
+					body.handRight.prevY = oldBody.handRight.y;
+					body.handLeft.prevX = oldBody.handLeft.x;
+					body.handLeft.prevY = oldBody.handLeft.y;
+					if (oldBody.handRight.grab) {
+						body.handRight.object = oldBody.handRight.object;
+					}
+					if (oldBody.handLeft.grab) {
+						body.handLeft.object = oldBody.handLeft.object;
+					}
+				}
+				bodies[body.TrackingId] = body;
+			};
+
+			kinect.client.onBodies = function (trackedBodyIdsJson, frame) {
+				var trackedBodyIds = null;
+
+				if (trackedBodyIdsJson != null) {
+					trackedBodyIds = JSON.parse(trackedBodyIdsJson);
+				}
+
+				if (!processingInstance) {
+					processingInstance = Processing.getInstanceById('simpleSkeletonVisualization');
+				}
+
+				processingInstance.onBodies(bodies, trackedBodyIds, frame);
+			};
+
+			$.connection.hub.start().done(function () {
+			});
+
+		});
+	</script>
+
+
+</head>
+<body>
+	<canvas id="simpleSkeletonVisualization" data-processing-sources="SimpleSkeletonVisualization.pde" />
+</body>
+</html>
