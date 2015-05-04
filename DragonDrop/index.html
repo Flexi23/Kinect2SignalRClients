@@ -1,0 +1,608 @@
+﻿<!DOCTYPE html>
+<!-- saved from url=(0120)http://www.cake23.de/hereBeDragons/hereBeDragons%5b1k%5d%20-%2010%20source%20marquee%20(update%20v.%201015%20Bytes).html -->
+<html>
+<script>
+	(function main() {
+		// Create enabled event
+		function fireEnabledEvent() {
+			// If gli exists, then we are already present and shouldn't do anything
+			if (!window.gli) {
+				setTimeout(function () {
+					var enabledEvent = document.createEvent("Event");
+					enabledEvent.initEvent("WebGLEnabledEvent", true, true);
+					document.dispatchEvent(enabledEvent);
+				}, 0);
+			} else {
+				//console.log("WebGL Inspector already embedded on the page - disabling extension");
+			}
+		};
+
+		// Grab the path root from the extension
+		document.addEventListener("WebGLInspectorReadyEvent", function (e) {
+			var pathElement = document.getElementById("__webglpathroot");
+			if (window["gliloader"]) {
+				gliloader.pathRoot = pathElement.innerText;
+			} else {
+				// TODO: more?
+				window.gliCssUrl = pathElement.innerText + "gli.all.css";
+			}
+		}, false);
+
+		// Rewrite getContext to snoop for webgl
+		var originalGetContext = HTMLCanvasElement.prototype.getContext;
+		if (!HTMLCanvasElement.prototype.getContextRaw) {
+			HTMLCanvasElement.prototype.getContextRaw = originalGetContext;
+		}
+		HTMLCanvasElement.prototype.getContext = function () {
+			var ignoreCanvas = this.internalInspectorSurface;
+			if (ignoreCanvas) {
+				return originalGetContext.apply(this, arguments);
+			}
+
+			var result = originalGetContext.apply(this, arguments);
+			if (result == null) {
+				return null;
+			}
+
+			var contextNames = ["moz-webgl", "webkit-3d", "experimental-webgl", "webgl", "3d"];
+			var requestingWebGL = contextNames.indexOf(arguments[0]) != -1;
+			if (requestingWebGL) {
+				// Page is requesting a WebGL context!
+				fireEnabledEvent(this);
+
+				// If we are injected, inspect this context
+				if (window.gli) {
+					if (gli.host.inspectContext) {
+						// TODO: pull options from extension
+						result = gli.host.inspectContext(this, result);
+						// NOTE: execute in a timeout so that if the dom is not yet
+						// loaded this won't error out.
+						window.setTimeout(function () {
+							var hostUI = new gli.host.HostUI(result);
+							result.hostUI = hostUI; // just so we can access it later for debugging
+						}, 0);
+					}
+				}
+			}
+
+			return result;
+		};
+	})();</script>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<title>JS1k, classic demo submission DragonDrop</title>
+	<meta charset="utf-8">
+	<style>
+		html, body {
+			margin: 0;
+			padding: 0;
+			border: 0;
+		}
+
+		#c {
+			display: block;
+		}
+		/* kill scrollbars from hell */
+	</style>
+	<style type="text/css"></style>
+	<script src="../Scripts/jquery-1.6.4.min.js"></script>
+	<script src="../Scripts/jquery.signalR-2.0.3.min.js"></script>
+	<script src="http://localhost:8080/signalr/hubs"></script>
+	<script type="text/javascript">
+
+		var TrackingIds = [];
+		var bodies = [];
+
+		function setBody(body) {
+			if (TrackingIds.indexOf(body.TrackingId) == -1) {
+				TrackingIds.push(body.TrackingId);
+			}
+			bodies[body.TrackingId] = body;
+		}
+
+		$(function () {
+			$.connection.hub.url = "http://localhost:8080/signalr";
+			var kinect = $.connection.kinectHub;
+
+			kinect.client.onBody = function (bodyJson, projectionMappedPointsJson) {
+				body = JSON.parse(bodyJson);
+				body.points2D = JSON.parse(projectionMappedPointsJson);
+
+				body.handRight = { "prevX": -1, "prevY": -1, "grab": false, "point": false, "object": null };
+				switch (body.handRight.state = body.HandRightState) {
+					case 3:
+						body.handRight.grab = true;
+						break;
+					case 4:
+						body.handRight.point = true;
+						break;
+				}
+				body.handRight.id = "hr" + body.TrackingId;
+				if (body.handRight.grab) {
+					body.handRight.x = (body.points2D["HandTipRight"][0] * 2 + body.points2D["HandRight"][0] + body.points2D["ThumbRight"][0] * 2) / 5;
+					body.handRight.y = (body.points2D["HandTipRight"][1] * 2 + body.points2D["HandRight"][1] + body.points2D["ThumbRight"][1] * 2) / 5;
+				} else if (body.handRight.point) {
+					body.handRight.x = body.points2D["HandTipRight"][0];
+					body.handRight.y = body.points2D["HandTipRight"][1];
+				}
+
+				body.handLeft = { "prevX": -1, "prevY": -1, "grab": false, "point": false, "object": null };
+				switch (body.handLeft.state = body.HandLeftState) {
+					case 3:
+						body.handLeft.grab = true;
+						break;
+					case 4:
+						body.handLeft.point = true;
+						break;
+				}
+				body.handLeft.id = "hl" + body.TrackingId;
+				if (body.handLeft.grab) {
+					body.handLeft.x = (body.points2D["HandTipLeft"][0] * 2 + body.points2D["HandLeft"][0] + body.points2D["ThumbLeft"][0] * 2) / 5;
+					body.handLeft.y = (body.points2D["HandTipLeft"][1] * 2 + body.points2D["HandLeft"][1] + body.points2D["ThumbLeft"][1] * 2) / 5;
+				} else if (body.handLeft.point) {
+					body.handLeft.x = body.points2D["HandTipLeft"][0];
+					body.handLeft.y = body.points2D["HandTipLeft"][1];
+				}
+
+				if (TrackingIds.indexOf(body.TrackingId) == -1) {
+					TrackingIds.push(body.TrackingId);
+				} else {
+					var oldBody = bodies[body.TrackingId];
+					body.handRight.prevX = oldBody.handRight.x;
+					body.handRight.prevY = oldBody.handRight.y;
+					body.handLeft.prevX = oldBody.handLeft.x;
+					body.handLeft.prevY = oldBody.handLeft.y;
+					if (oldBody.handRight.grab) {
+						body.handRight.object = oldBody.handRight.object;
+					}
+					if (oldBody.handLeft.grab) {
+						body.handLeft.object = oldBody.handLeft.object;
+					}
+				}
+				bodies[body.TrackingId] = body;
+			};
+
+			kinect.client.onBodies = function (trackedBodyIdsJson, frame) {
+				var trackedBodyIds = null;
+
+				if (trackedBodyIdsJson != null) {
+					trackedBodyIds = JSON.parse(trackedBodyIdsJson);
+				}
+
+				onBodies(bodies, trackedBodyIds, frame);
+			};
+
+			$.connection.hub.start().done(function () {
+			});
+
+		});
+
+		var bodies, trackedBodyIds, bodyFrameIndex;
+
+		// Kinect body frame arrived
+
+		function onBodies(bodies, bodyIds, frame) {
+			bodyFrameIndex = frame;
+			bodies = bodies;
+			trackedBodyIds = bodyIds;
+		}
+
+		// drawing skeletons and drag and drop controls
+
+		var joints = ["SpineBase", "SpineMid", "Neck", "Head", "ShoulderLeft",
+		 "ElbowLeft", "WristLeft", "HandLeft", "ShoulderRight", "ElbowRight",
+		  "WristRight", "HandRight", "HipLeft", "KneeLeft", "AnkleLeft",
+		  "FootLeft", "HipRight", "KneeRight", "AnkleRight", "FootRight",
+		  "SpineShoulder", "HandTipLeft", "ThumbLeft", "HandTipRight", "ThumbRight"];
+
+		var members = [
+			["SpineBase", "SpineMid"],
+			["SpineMid", "SpineShoulder"],
+			["SpineShoulder", "Neck"],
+			["Neck", "Head"],
+			["SpineShoulder", "ShoulderLeft"],
+			["ShoulderLeft", "ElbowLeft"],
+			["ElbowLeft", "WristLeft"],
+			["WristLeft", "HandLeft"],
+			["HandLeft", "HandTipLeft"],
+			["HandLeft", "ThumbLeft"],
+			["SpineBase", "HipLeft"],
+			["HipLeft", "KneeLeft"],
+			["KneeLeft", "AnkleLeft"],
+			["AnkleLeft", "FootLeft"],
+			["SpineShoulder", "ShoulderRight"],
+			["ShoulderRight", "ElbowRight"],
+			["ElbowRight", "WristRight"],
+			["WristRight", "HandRight"],
+			["HandRight", "HandTipRight"],
+			["HandRight", "ThumbRight"],
+			["SpineBase", "HipRight"],
+			["HipRight", "KneeRight"],
+			["KneeRight", "AnkleRight"],
+			["AnkleRight", "FootRight"]
+		];
+
+		var grabables = [];
+
+
+		// initial controls
+
+		for (i = 0; i < 4; i++) {
+			grabables.push({ "x": 64 + i * 128, "y": 212, "grabbedBy": null });
+		}
+
+		grabables[0].x = 128 - 32;
+		grabables[0].y = 212 + 32;
+		grabables[1].x = 128 + 32;
+		grabables[1].y = 212 - 32;
+		grabables[2].x = 384 - 32;
+		grabables[2].y = 212 - 32;
+		grabables[3].x = 384 + 32;
+		grabables[3].y = 212 + 32;
+
+		var w = 512, h = 424, kinectScale = 1, kinectDx = 0, kinectDy = 0, bodyFrameIndex = 0, oldBodyFrameIndex = 1;
+
+		function updateKinectScale(w, h) {
+			if (w / h > 512 / 424) {
+				kinectScale = h / 424;
+				kinectDx = w / 2 - 256 * kinectScale;
+				kinectDy = 0;
+			}
+			else {
+				kinectScale = w / 512;
+				kinectDx = 0;
+				kinectDy = h / 2 - 212 * kinectScale;
+			}
+		}
+
+		function drawKinectScene(c) {
+			if (grabFrame = bodyFrameIndex > oldBodyFrameIndex) {
+				oldBodyFrameIndex = bodyFrameIndex;
+			}
+
+			c.save();
+			c.translate(kinectDx, kinectDy);
+			c.scale(kinectScale, kinectScale);
+
+			drawBodies(c);
+			drawControls(c);
+
+			c.strokeStyle = "#FFF";
+
+			c.beginPath();
+			c.rect(0, 0, 512, 424);
+			c.stroke();
+
+			c.restore();
+		}
+
+		function drawControls(c) {
+			c.strokeStyle = "#FFF";
+			c.lineWidth = 1.5;
+
+			grabables.forEach(function (g) {
+				drawRing(c, g.x, g.y, 12.5, ((g.grabbedBy == null) ? "#CCC" : "#0C0"));
+			});
+		}
+
+		function fillCircle(c, x, y, r) {
+			c.beginPath();
+			c.arc(x, y, r, 0, 2 * Math.PI, false);
+			c.fill();
+		}
+
+		function drawCircle(c, x, y, r, thick, col) {
+			c.strokeStyle = col;
+			c.lineWidth = thick;
+			c.beginPath();
+			c.arc(x, y, r, 0, 2 * Math.PI, false);
+			c.stroke();
+		}
+
+		function drawRing(c, x, y, r, col) {
+			drawCircle(c, x, y, r - 2, 2, "#000");
+			drawCircle(c, x, y, r, 1.5, col);
+		}
+
+		function drawBodies(c) {
+			if (trackedBodyIds != null) {
+				for (var i = 0; i < trackedBodyIds.length; i++) {
+					var trackingId = trackedBodyIds[i];
+					drawBody(c, bodies[trackingId]);
+				}
+			}
+		}
+
+		function drawBody(c, body) {
+			if (body == null) {
+				return;
+			}
+
+			// draw head
+
+			var headX = body.points2D["Head"][0];
+			var headY = body.points2D["Head"][1];
+			var neckX = body.points2D["Neck"][0];
+			var neckY = body.points2D["Neck"][1];
+
+			var headSize = Math.sqrt((headX - neckX) * (headX - neckX) + (headY - neckY) * (headY - neckY));
+			var headColor = "#888";
+
+			drawRing(c, headX, headY, headSize, headColor);
+
+			// draw hand
+
+			drawHand(body.handLeft);
+			drawHand(body.handRight);
+
+
+			// uh oh, this is not a drawing call but drag and drop logic. todo: extract that
+
+			if (grabFrame) {
+				grabWith(body.handLeft);
+				grabWith(body.handRight);
+			}
+
+			// draw bones
+
+			c.beginPath();
+			c.strokeStyle = "#444";
+			c.lineWidth = 3;
+
+			members.forEach(function (member) {
+				var t1 = body.Joints[member[0]].TrackingState;
+				var t2 = body.Joints[member[1]].TrackingState;
+				if (t1 == 2 && t2 == 2) {
+					var x1 = body.points2D[member[0]][0];
+					var y1 = body.points2D[member[0]][1];
+					var x2 = body.points2D[member[1]][0];
+					var y2 = body.points2D[member[1]][1];
+
+					c.moveTo(x1, y1);
+					c.lineTo(x2, y2);
+				}
+			});
+
+			c.stroke();
+
+			// draw joints
+
+			joints.forEach(function (joint) {
+				var ts = body.Joints[joint].TrackingState;
+				switch (ts) {
+					case 0:
+					case 1:
+						c.fillStyle = "#F00";
+						break;
+					case 2:
+						c.fillStyle = "#0F0";
+						break;
+				}
+				var x = body.points2D[joint][0];
+				var y = body.points2D[joint][1];
+
+				fillCircle(c, x, y, 3);
+			});
+
+		}
+
+		var handNotTrackedColor = "#F00";
+		var handLassoColor = "#00F";
+		var handOpenColor = "#FFF";
+		var handClosedColor = "#0F0";
+		var handUnknownColor = "#F80";
+
+		function drawHand(hand) {
+
+			var handColor = handOpenColor;
+
+			switch (hand.state) {
+				case 0:
+					handColor = handNotTrackedColor;
+					break;
+				case 1:
+					handColor = handLassoColor;
+					break;
+				case 2:
+					handColor = handOpenColor;
+					break;
+				case 3:
+					handColor = handClosedColor;
+					break;
+				case 4:
+					handColor = handUnknownColor;
+					break;
+			}
+
+			// todo: extract drag and drop logic
+
+			if (!hand.grab) {
+				releaseObject(hand);
+			}
+
+			if (hand.point || hand.grab && !hand.object) {
+				c.fillStyle = handColor;
+				fillCircle(c, hand.x, hand.y, 12.5);
+			}
+		}
+
+		function releaseObject(hand) {
+			if (hand.object) {
+				hand.object.grabbedBy = null;
+				hand.object = null;
+				hand.grab = false;
+			}
+		}
+
+		function grabWith(hand) {
+
+			if (!hand.grab) {
+				return;
+			}
+
+			if (hand.object) {
+				/* that would be a real differential shift
+				hand.object.x += hand.x - hand.prevX;
+				hand.object.y += hand.y - hand.prevY;
+				hand.prevX = hand.x;
+				hand.prevY = hand.y;
+				*/
+
+				// rather snap it right in the hand
+				hand.object.x = hand.x;
+				hand.object.y = hand.y;
+
+				// in case you want to toss something
+				// hand.object.vX = (hand.x - hand.prevX);
+				// hand.object.vY = (hand.y - hand.prevY);
+				return;
+			}
+
+			var minD = 1000;
+			var nearestGrabable = null;
+
+			grabables.forEach(function (o) {
+				var d = Math.sqrt((o.x - hand.x) * (o.x - hand.x) + (o.y - hand.y) * (o.y - hand.y));
+				if (d <= minD && o.grabbedBy == null) {
+					minD = d;
+					nearestGrabable = o;
+				}
+			});
+
+			var threshold = 12.5;
+			if (minD <= threshold) {
+				nearestGrabable.grabbedBy = hand.id;
+				hand.object = nearestGrabable;
+			}
+		}
+	</script>
+</head>
+<body>
+	<canvas id="c" width="942" height="917" style="width: 942px; height: 917px;"></canvas>
+	<script>
+		var a = document.getElementsByTagName('canvas')[0];
+		var b = document.body;
+		var d = function (e) { return function () { e.parentNode.removeChild(e); }; }(a);
+		// unprefix some popular vendor prefixed things (but stick to their original name)
+		var AudioContext =
+		  window.AudioContext ||
+		  window.webkitAudioContext;
+		var requestAnimationFrame =
+		  window.requestAnimationFrame ||
+		  window.mozRequestAnimationFrame ||
+		  window.webkitRequestAnimationFrame ||
+		  window.msRequestAnimationFrame ||
+		  function (f) { setTimeout(f, 1000 / 30); };
+
+		// fix bug in safari: http://qfox.nl/weblog/218
+		document.body.clientWidth;
+		// auto resize (original) canvas. call `onresize(w,h) to limit the size of the canvas
+		(window.onorientationchange = window.onresize = function (a) {
+			var mw = Infinity;
+			var mh = Infinity;
+			var min = Math.min;
+
+			return function (w, h) {
+				if (arguments.length === 2) {
+					mw = w;
+					mh = h;
+				}
+				a.style.width = (a.width = min(mw, innerWidth)) + 'px';
+				a.style.height = (a.height = min(mh, innerHeight)) + 'px';
+			};
+		}(a))();
+
+		var c = a.getContext('2d');
+	</script>
+	<script>
+
+		function t4(f) { f(0); f(1); f(2); f(3); }
+
+		k = a;
+		b = []; // "framebuffers" and control points in the same array to save some chars
+		(function init(i) {
+			w = k.width;
+			h = k.height
+
+			updateKinectScale(w, h);
+
+			t4(function (i) {
+				e = d; // cheaper way to access b[2] later on
+				f = a; // and b[2].c too
+
+				// in fact, we only need two additional buffers for the feedback loop and the overlay, welcome affluence. :D
+				d = b[i] = document.createElement("canvas"); // b[3] at last
+				d.width = w; d.height = h;
+				a = d.c = d.getContext('2d');
+
+				d.d = 0;
+			});
+		})();
+		g = b[0]; j = b[1];
+
+
+		// building block for 2D http://en.wikipedia.org/wiki/Lindenmayer_system
+		function L(p) {
+			with (f) { // f == b[2].c
+				save(); // push matrix
+				translate(p.x, p.y); rotate(-p.r); scale(p.s, p.s); translate(-w / 2, -h / 2); // multiply matrix
+				globalCompositeOperation = 'lighter'; // enable additive blend
+				drawImage(d, 0, 0); // add s-scaled copy of b[3] translated to x/y and rotated by r
+				fillStyle = "#010203"; fillRect(0, 0, w, h); // increment color in the transformed rectangle
+				restore(); // pop matrix
+			}
+		}
+
+		function updateControls() {
+			x = (grabables[0].x + grabables[1].x) / 2;
+			y = (grabables[0].y + grabables[1].y) / 2;
+
+			e.x = kinectDx + x * kinectScale;
+			e.y = kinectDy + y * kinectScale;
+			e.r = Math.PI / 2 - Math.atan2(grabables[0].y - grabables[1].y, grabables[0].x - grabables[1].x);;
+			e.s = Math.sqrt((grabables[0].y - grabables[1].y) * (grabables[0].y - grabables[1].y) + (grabables[0].x - grabables[1].x) * (grabables[0].x - grabables[1].x)) / 150;
+
+			x = (grabables[2].x + grabables[3].x) / 2;
+			y = (grabables[2].y + grabables[3].y) / 2;
+
+			d.x = kinectDx + x * kinectScale;
+			d.y = kinectDy + y * kinectScale;
+			d.r = Math.PI / 2 - Math.atan2(grabables[2].y - grabables[3].y, grabables[2].x - grabables[3].x);
+			d.s = Math.sqrt((grabables[2].y - grabables[3].y) * (grabables[2].y - grabables[3].y) + (grabables[2].x - grabables[3].x) * (grabables[2].x - grabables[3].x)) / 150;
+		}
+
+		(function anim(i) {
+			requestAnimationFrame(anim);
+
+			if (k.height != h) { // because window resize rocks | u2 lazy 2 use F5 | Firefox on Android
+				sx = k.width / w;
+				sy = k.height / h;
+				w = k.width; h = k.height;
+
+				updateKinectScale(w, h);
+
+				t4(function (i) {
+					with (b[i]) {
+						width = w; height = h; x *= sx; y *= sy;
+					}
+				});
+			}
+
+			f.fillStyle = "#000";
+			f.fillRect(0, 0, w, h); // clear offscreen-rendertarget for the feedback layer
+			L(d); L(e); // L-systems are composited of smaller copies of them, now you know
+
+			a.drawImage(e, 0, 0); // draw in a to draw into the feedback loop
+			c.drawImage(e, 0, 0); // draw in c to composite with an overlay
+
+			updateControls();
+
+			drawKinectScene(c);
+		})();
+
+		// end of submission //
+	</script>
+
+
+</body>
+</html>
