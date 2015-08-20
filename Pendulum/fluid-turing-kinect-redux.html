@@ -1,0 +1,3069 @@
+﻿<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<title>Kinect v2 Skeletal Tracking SignalR Client with WebGL Turing Pattern Fluid</title>
+
+	<script src="../Scripts/jquery-1.6.4.min.js"></script>
+	<script src="../Scripts/jquery.signalR-2.0.3.min.js"></script>
+
+	<!-- TODO: extract kinect binding to reusable js lib -->
+	<!-- Websocket Connection and Drag'n'Drop -->
+	<script src="http://localhost:8080/signalr/hubs"></script>
+	<script type="text/javascript">
+
+		$(function () {
+			$.connection.hub.url = "http://localhost:8080/signalr";
+			var kinect = $.connection.kinectHub;
+
+			kinect.client.onBody = function (bodyJson, projectionMappedPointsJson) {
+				body = JSON.parse(bodyJson);
+				//body.points2D = JSON.parse(projectionMappedPointsJson);
+
+				body.head = { x: body.Joints["Head"].Position.X, y: body.Joints["Head"].Position.Y, z: body.Joints["Head"].Position.X };
+
+				body.handRight = { "prevX": -1, "prevY": -1, "prevZ": -1, "grab": false, "point": false, "object": null };
+				switch (body.handRight.state = body.HandRightState) {
+					case 3:
+						body.handRight.grab = true;
+						break;
+					case 4:
+						body.handRight.point = true;
+						break;
+				}
+				body.handRight.id = "hr" + body.TrackingId;
+				//if (body.handRight.grab) {
+				body.handRight.x = (body.Joints["HandTipRight"].Position.X * 2 + body.Joints["HandRight"].Position.X + body.Joints["ThumbRight"].Position.X * 2) / 5;
+				body.handRight.y = -(body.Joints["HandTipRight"].Position.Y * 2 + body.Joints["HandRight"].Position.Y + body.Joints["ThumbRight"].Position.Y * 2) / 5;
+				body.handRight.z = (body.Joints["HandTipRight"].Position.Z * 2 + body.Joints["HandRight"].Position.Z + body.Joints["ThumbRight"].Position.Z * 2) / 5;
+				//} else
+				if (body.handRight.point) {
+					body.handRight.x = body.Joints["HandTipRight"].Position.X;
+					body.handRight.y = -body.Joints["HandTipRight"].Position.Y;
+					body.handRight.z = body.Joints["HandTipRight"].Position.Z;
+				}
+
+				body.handLeft = { "prevX": -1, "prevY": -1, "prevZ": -1, "grab": false, "point": false, "object": null };
+				switch (body.handLeft.state = body.HandLeftState) {
+					case 3:
+						body.handLeft.grab = true;
+						break;
+					case 4:
+						body.handLeft.point = true;
+						break;
+				}
+				body.handLeft.id = "hl" + body.TrackingId;
+				//if (body.handLeft.grab) {
+				body.handLeft.x = (body.Joints["HandTipLeft"].Position.X * 2 + body.Joints["HandLeft"].Position.X + body.Joints["ThumbLeft"].Position.X * 2) / 5;
+				body.handLeft.y = -(body.Joints["HandTipLeft"].Position.Y * 2 + body.Joints["HandLeft"].Position.Y + body.Joints["ThumbLeft"].Position.Y * 2) / 5;
+				body.handLeft.z = (body.Joints["HandTipLeft"].Position.Z * 2 + body.Joints["HandLeft"].Position.Z + body.Joints["ThumbLeft"].Position.Z * 2) / 5;
+				//} else
+				if (body.handLeft.point) {
+					body.handLeft.x = body.Joints["HandTipLeft"].Position.X;
+					body.handLeft.y = -body.Joints["HandTipLeft"].Position.Y;
+					body.handLeft.z = body.Joints["HandTipLeft"].Position.Z;
+				}
+
+				var trackingObject = getTrackingObject(body.TrackingId);
+
+				if (trackingObject.body == null) {
+					trackingObject.body = body;
+				} else {
+					var oldBody = trackingObject.body;
+					body.handRight.prevX = oldBody.handRight.x;
+					body.handRight.prevY = oldBody.handRight.y;
+					body.handRight.prevZ = oldBody.handRight.z;
+					body.handLeft.prevX = oldBody.handLeft.x;
+					body.handLeft.prevY = oldBody.handLeft.y;
+					body.handLeft.prevZ = oldBody.handLeft.z;
+					if (oldBody.handRight.grab) {
+						body.handRight.object = oldBody.handRight.object;
+					}
+					if (oldBody.handLeft.grab) {
+						body.handLeft.object = oldBody.handLeft.object;
+					}
+				}
+				trackingObject.body = body; // update
+			};
+
+			kinect.client.onBodies = function (trackingIdsJson, frame) {
+				var trackingIds = null;
+
+				if (trackingIdsJson != null) {
+					trackingIds = JSON.parse(trackingIdsJson);
+				}
+
+				onBodies(trackingObjects, trackingIds, frame);
+			};
+
+			kinect.client.onOSC = function (name, dataJson) {
+				data = JSON.parse(dataJson);
+				onOSC(name, data);
+			}
+
+			$.connection.hub.start().done(function () {
+			});
+
+		});
+
+		var trackingObjects = [], bodyFrameIndex;
+
+		function getTrackingObject(id) {
+			var hit = null;
+			trackingObjects.forEach(function (trackingObject) { // perhaps not the most efficient way, but don't expect too many tracked bodies anyway
+				if (trackingObject.id == id) {
+					hit = trackingObject;
+				}
+			});
+
+			if (hit) {
+				return hit;
+			}
+
+			// create new trackingObject
+			console.log("create tracking object " + id);
+			var trackingObject = { id: id, body: null }; // init as object that can be easily extended with additional properties
+			trackingObjects.push(trackingObject);
+			return trackingObject;
+		}
+
+		// Kinect body frame arrived
+
+		var activeTrackingObjects = [];
+
+		function onBodies(trackingObjects, trackedBodyIds, frame) {
+			bodyFrameIndex = frame;
+			activeTrackingObjects = [];
+			trackedBodyIds.forEach(function (id) {
+				activeTrackingObjects.push(getTrackingObject(id));
+			});
+		}
+
+		var osc = [];
+		var oscNames = []
+
+		function onOSC(name, data) {
+			osc[name] = data;
+		}
+
+		// drawing skeletons and drag and drop controls
+
+		var joints = ["SpineBase", "SpineMid", "Neck", "Head", "ShoulderLeft",
+ "ElbowLeft", "WristLeft", "HandLeft", "ShoulderRight", "ElbowRight",
+  "WristRight", "HandRight", "HipLeft", "KneeLeft", "AnkleLeft",
+  "FootLeft", "HipRight", "KneeRight", "AnkleRight", "FootRight",
+  "SpineShoulder", "HandTipLeft", "ThumbLeft", "HandTipRight", "ThumbRight"];
+
+		var members = [
+//	["SpineBase", "SpineMid"],
+//	["SpineMid", "SpineShoulder"],
+	["SpineShoulder", "Neck"],
+	["Neck", "Head"],
+	["SpineShoulder", "ShoulderLeft"],
+	["ShoulderLeft", "ElbowLeft"],
+	["ElbowLeft", "WristLeft"],
+	["WristLeft", "HandLeft"],
+	["HandLeft", "HandTipLeft"],
+	["HandLeft", "ThumbLeft"],
+	["SpineBase", "HipLeft"],
+	["SpineBase", "KneeLeft"],
+	["SpineBase", "KneeRight"],
+//	["HipLeft", "ShoulderLeft"],
+	["HipLeft", "KneeLeft"],
+	["KneeLeft", "AnkleLeft"],
+	["AnkleLeft", "FootLeft"],
+	["SpineShoulder", "ShoulderRight"],
+	["ShoulderRight", "ElbowRight"],
+	["ElbowRight", "WristRight"],
+	["WristRight", "HandRight"],
+	["HandRight", "HandTipRight"],
+	["HandRight", "ThumbRight"],
+	["SpineBase", "HipRight"],
+//	["HipRight", "ShoulderRight"],
+	["HipRight", "KneeRight"],
+	["KneeRight", "AnkleRight"],
+	["AnkleRight", "FootRight"],
+	["SpineMid", "ShoulderRight"],
+	["SpineMid", "ShoulderLeft"],
+	["SpineMid", "HipRight"],
+	["SpineMid", "HipLeft"]
+		];
+
+		// perspective correction
+
+		function project(p3d, p2d) {
+			p2d.x = p3d.x;
+			p2d.y = p3d.y;
+
+			var w = Math.atan2(-p3d.x, -p3d.y);
+			var l = Math.sqrt(p3d.x * p3d.x + p3d.y * p3d.y);
+
+			var d = 1.;
+			var zoom = 2.;
+
+			var p = Math.tan(Math.PI / 2 + Math.atan2(d + p3d.z, l));
+			d = Math.sqrt(p3d.x * p3d.x + p3d.y * p3d.y + (p3d.z + d) * (p3d.z + d));
+
+			p2d.x = zoom * Math.sin(w) * p / aspectx + 0.5;
+			p2d.y = zoom * Math.cos(w) * p / aspecty + 0.5;
+		}
+
+	</script>
+
+	<!-- some bone material for the skeleton display-->
+
+	<script id="shader-vs-shape" type="x-shader/x-vertex">
+		attribute vec3 aPos;
+		attribute float aInside;
+		varying float inside;
+		void main(void) {
+		gl_Position = vec4(aPos, 1.);
+		inside = aInside;
+		}
+	</script>
+
+	<script id="shader-fs-shape" type="x-shader/x-fragment">
+		uniform vec4 innerColor;
+		uniform vec4 outerColor;
+
+		varying float inside;
+
+		void main(void) {
+		gl_FragColor = mix(outerColor, innerColor, vec4(inside));
+		}
+	</script>
+
+	<!-- WebGL supported skeletal model-->
+
+	<script>
+
+		var LineShape = function () {
+			this.enabled = true;
+			this.x1 = 0.1;
+			this.y1 = 0.2;
+			this.x2 = 0.5;
+			this.y2 = 0.5;
+			this.thickness = 0.01;
+			this.innerColor = {
+				r: 1,
+				g: 1,
+				b: 1,
+				a: 1
+			};
+			this.outerColor = {
+				r: 0,
+				g: 0,
+				b: 0,
+				a: 0.
+			};
+			this.additive = true;
+
+			this.render = function (targetFBO) {
+				if (this.enabled && !(this.x1 == this.x2 && this.y1 == this.y2)) {
+					gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+					gl.useProgram(prog_shape);
+					gl.uniform4f(gl.getUniformLocation(prog_shape, "innerColor"), this.innerColor.r, this.innerColor.g, this.innerColor.b,
+		this.innerColor.a);
+					gl.uniform4f(gl.getUniformLocation(prog_shape, "outerColor"), this.outerColor.r, this.outerColor.g, this.outerColor.b,
+		this.outerColor.a);
+					// stride = 12, for 3 float values, first 2 geometry, last one "inside" value
+					gl.vertexAttribPointer(this.aPosLoc, 2, gl.FLOAT, gl.FALSE, 12, 0);
+					gl.vertexAttribPointer(this.aInsideLoc, 1, gl.FLOAT, gl.FALSE, 12, 8);
+					gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+					gl.enable(gl.BLEND);
+					var blendMode = this.additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA;
+					gl.blendFunc(gl.SRC_ALPHA, blendMode);
+					if (targetFBO == null) {
+						gl.viewport(0, 0, viewX, viewY);
+					} else {
+						gl.viewport(0, 0, sizeX, sizeY);
+					}
+					gl.drawArrays(gl.TRIANGLES, 0, this.trianglesIndices.length);
+					gl.disable(gl.BLEND);
+				}
+			};
+
+			this.update = function () {
+
+				this.points[1].x = (this.x1 - 0.5);
+				this.points[1].y = (this.y1 - 0.5);
+				this.points[3].x = (this.x2 - 0.5);
+				this.points[3].y = (this.y2 - 0.5);
+
+				var l = Math.sqrt((this.points[3].x - this.points[1].x) * (this.points[3].x - this.points[1].x) * viewY / viewX
+		+ (this.points[3].y - this.points[1].y) * (this.points[3].y - this.points[1].y));
+				var dx = (this.points[3].x - this.points[1].x) * this.thickness / l;
+				var dy = (this.points[3].y - this.points[1].y) * this.thickness / l;
+
+				this.points[0].x = this.points[1].x - dx - dy;
+				this.points[0].y = this.points[1].y - dy + dx;
+				this.points[4].x = this.points[3].x + dx - dy;
+				this.points[4].y = this.points[3].y + dy + dx;
+				this.points[2].x = (this.points[0].x + this.points[4].x) / 2;
+				this.points[2].y = (this.points[0].y + this.points[4].y) / 2;
+				this.points[8].x = this.points[1].x - dx + dy;
+				this.points[8].y = this.points[1].y - dy - dx;
+				this.points[5].x = this.points[3].x + dx + dy;
+				this.points[5].y = this.points[3].y + dy - dx;
+				this.points[7].x = (this.points[8].x + this.points[5].x) / 2;
+				this.points[7].y = (this.points[8].y + this.points[5].y) / 2;
+
+				for (var i = 0; i < this.trianglesIndices.length; i++) {
+					this.data[i * 3 + 0] = this.points[this.trianglesIndices[i]].x;
+					this.data[i * 3 + 1] = this.points[this.trianglesIndices[i]].y;
+					this.data[i * 3 + 2] = this.points[this.trianglesIndices[i]].inside;
+				}
+				gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+				gl.bufferData(gl.ARRAY_BUFFER, this.data, gl.DYNAMIC_DRAW);
+			};
+
+			// create initial vertex data
+			this.points = [];
+			for (var i = 0; i < 9; i++) {
+				this.points.push({
+					x: 0,
+					y: 0,
+					inside: 0
+				});
+			}
+			this.points[1].inside = 1;
+			this.points[3].inside = 1;
+			this.trianglesIndices = [0, 1, 2, 2, 1, 3, 2, 3, 4, 3, 5, 4, 3, 7, 5, 3, 1, 7, 1, 8, 7, 0, 8, 1];
+			var rawData = [];
+			for (var i = 0; i < this.trianglesIndices.length; i++) {
+				rawData.push(0, 0, 0);
+			}
+			this.data = new Float32Array(rawData);
+			this.buffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+			gl.bufferData(gl.ARRAY_BUFFER, this.data, gl.DYNAMIC_DRAW);
+			this.aPosLoc = gl.getAttribLocation(prog_shape, "aPos");
+			this.aInsideLoc = gl.getAttribLocation(prog_shape, "aInside");
+			this.update();
+		};
+
+		var RegularShape = function () {
+			this.enabled = true;
+			this.numSides = 3;
+			this.cx = 0.;
+			this.cy = 0.;
+			this.size = 0.1;
+			this.angle = 0;
+			this.innerColor = {
+				r: 0,
+				g: 0,
+				b: 1,
+				a: 1
+			};
+			this.outerColor = {
+				r: 0,
+				g: 0,
+				b: 0,
+				a: 0.
+			};
+			this.additive = true;
+
+			this.render = function (targetFBO) {
+				if (this.enabled) {
+					gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+					gl.useProgram(prog_shape);
+					gl.uniform4f(gl.getUniformLocation(prog_shape, "innerColor"), this.innerColor.r, this.innerColor.g, this.innerColor.b,
+		this.innerColor.a);
+					gl.uniform4f(gl.getUniformLocation(prog_shape, "outerColor"), this.outerColor.r, this.outerColor.g, this.outerColor.b,
+		this.outerColor.a);
+					// stride = 12, for 3 float values, first 2 geometry, last one "inside" value
+					gl.vertexAttribPointer(this.aPosLoc, 2, gl.FLOAT, gl.FALSE, 12, 0);
+					gl.vertexAttribPointer(this.aInsideLoc, 1, gl.FLOAT, gl.FALSE, 12, 8);
+					gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+					if (targetFBO == null) {
+						gl.viewport(0, 0, viewX, viewY);
+					} else {
+						gl.viewport(0, 0, sizeX, sizeY);
+					}
+					gl.enable(gl.BLEND);
+					var blendMode = this.additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA;
+					gl.blendFunc(gl.SRC_ALPHA, blendMode);
+					gl.drawArrays(gl.TRIANGLE_FAN, 0, this.numSides + 2);
+					gl.disable(gl.BLEND);
+				}
+			};
+
+			this.update = function () {
+				this.data[0] = (this.cx - 0.5);
+				this.data[1] = (this.cy - 0.5);
+				for (var i = 0; i < this.numSides + 1; i++) {
+					var x = (this.cx - 0.5) + Math.cos(this.angle + Math.PI * 2 * i / this.numSides) * this.size * viewY / viewX;
+					var y = (this.cy - 0.5) + Math.sin(this.angle + Math.PI * 2 * i / this.numSides) * this.size;
+					this.data[3 + i * 3] = x;
+					this.data[3 + i * 3 + 1] = y;
+				}
+				gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+				gl.bufferData(gl.ARRAY_BUFFER, this.data, gl.DYNAMIC_DRAW);
+			};
+
+			// create initial vertex data
+			var maxNumSides = 256;
+			var rawData = [0, 0, 1];
+			for (var i = 0; i < maxNumSides + 1; i++) {
+				rawData.push(0, 0, 0);
+			}
+			this.data = new Float32Array(rawData);
+			this.buffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+			gl.bufferData(gl.ARRAY_BUFFER, this.data, gl.DYNAMIC_DRAW);
+			this.aPosLoc = gl.getAttribLocation(prog_shape, "aPos");
+			this.aInsideLoc = gl.getAttribLocation(prog_shape, "aInside");
+			this.update();
+		};
+
+		var Joint = function () {
+			this.x = 0.5;
+			this.y = 0.5;
+			this.z = 1;
+			this.old = {};
+			this.old.x = 0.5;
+			this.old.y = 0.5;
+			this.old.z = 1;
+			this.updatePos = function (pos) {
+				this.old.x = this.x;
+				this.old.y = this.y;
+				this.old.z = this.z;
+				this.x = pos.x;
+				this.y = pos.y;
+				this.z = pos.z;
+			};
+			this.initShape = function () {
+				this.shape = new RegularShape();
+				this.shape.additive = false;
+				this.shape.size = 0.02;
+				this.shape.numSides = 8;
+				this.shape.innerColor = {
+					r: 1.,
+					g: 1.,
+					b: 1.,
+					a: 1
+				};
+				this.shape.outerColor = {
+					r: 0.,
+					g: 0.,
+					b: 0.,
+					a: 0
+				};
+				this.updateShape();
+			};
+			this.updateShape = function () {
+				this.shape.cx = this.x;
+				this.shape.cy = this.y;
+				this.shape.update();
+			};
+		};
+
+		var Bone = function (joint1, joint2) {
+			this.joint1 = joint1;
+			this.joint2 = joint2;
+
+			this.updateShape = function () {
+				this.shape.x1 = this.joint1.x;
+				this.shape.y1 = this.joint1.y;
+				this.shape.x2 = this.joint2.x;
+				this.shape.y2 = this.joint2.y;
+				this.shape.update();
+			};
+
+			this.initShape = function () {
+				this.shape = new LineShape();
+			};
+		}
+
+		var KinectWebGLSkeletalModel = function ($) {
+			var self = this;
+
+			self.$ = $;
+
+			this.joints = []; // for WebGL, we use an extended joint model with some vertex data attached
+
+			joints.forEach(function (name) { // we just init the skeleton's joints with the same indices so that they can be iterated through in the same way, sorry if the global joints variable and the class member variable are confusing.
+				self.joints[name] = new Joint();
+			});
+
+			this.bones = []; // what were once members in the raw data model are now bones with a rectangle vertex amendment
+			members.forEach(function (member) {
+				self.bones[member] = new Bone(self.joints[member[0]], self.joints[member[1]]);
+			});
+
+			this.head = new Joint();
+			this.handLeft = new Joint();
+			this.handRight = new Joint();
+
+			// remember always iterate over the global name arrays and use explicite keys - somehow forEach won't work directly
+
+			this.shuffle = function () {
+				joints.forEach(function (id) {
+					joint = self.joints[id];
+					joint.x = Math.random() * 0.3 * viewY / viewX + 0.5;
+					joint.y = Math.random() * 0.3 + 0.5;
+					joint.updateShape();
+				});
+
+				members.forEach(function (id) {
+					self.bones[id].updateShape();
+				});
+			};
+
+			this.init = function () {
+				joints.forEach(function (id) {
+					joint = self.joints[id];
+					joint.initShape();
+				});
+
+				self.head.initShape();
+				self.head.shape.numSides = 16;
+				self.head.shape.innerColor = { r: 0, g: 0, b: 1., a: 1 };
+
+				self.handLeft.initShape();
+				self.handLeft.shape.size = 0.12;
+				self.handLeft.shape.numSides = 16;
+				self.handLeft.shape.innerColor = { r: 0, g: 0, b: 0, a: 0 };
+
+				self.handRight.initShape();
+				self.handRight.shape.size = 0.12;
+				self.handRight.shape.numSides = 16;
+				self.handRight.shape.innerColor = { r: 0, g: 0, b: 0, a: 0 };
+
+				self.handLeft.pendulum = new Pendulum();
+				self.handRight.pendulum = new Pendulum();
+
+				streakLength = 80; // number of LEDs
+				historyLength = 16; // number of memorized frames
+
+				self.handLeft.pendulum.initStreaks(streakLength, historyLength);
+				self.handRight.pendulum.initStreaks(streakLength, historyLength);
+
+				self.handLeft.pendulum.applyColor = self.handLeft.pendulum.patterns["rgb sines"];
+				self.handRight.pendulum.applyColor = self.handLeft.pendulum.patterns["cmy sines"];
+
+				self.handLeft.pendulum.applyColor = self.handLeft.pendulum.patterns["white stripes"];
+				self.handRight.pendulum.applyColor = self.handLeft.pendulum.patterns["white stripes"];
+
+				//self.handLeft.pendulum.applyColor = self.handLeft.pendulum.patterns["transparent"];
+				//self.handRight.pendulum.applyColor = self.handLeft.pendulum.patterns["transparent"];
+
+				members.forEach(function (id) {
+					bone = self.bones[id];
+					bone.initShape();
+				});
+
+				self.shuffle();
+			};
+
+			self.init();
+
+			this.updateShapes = function () {
+				joints.forEach(function (id) {
+					joint = self.joints[id];
+					joint.updateShape();
+				});
+
+				//self.head.updateShape();
+
+				self.handLeft.updateShape();
+				self.handRight.updateShape();
+
+				self.handLeft.pendulum.x = self.$.body.handLeft.x;
+				self.handLeft.pendulum.y = self.$.body.handLeft.y;
+				self.handLeft.pendulum.z = self.$.body.handLeft.z;
+				self.handRight.pendulum.x = self.$.body.handRight.x;
+				self.handRight.pendulum.y = self.$.body.handRight.y;
+				self.handRight.pendulum.z = self.$.body.handRight.z;
+
+				members.forEach(function (id) {
+					bone = self.bones[id];
+					bone.updateShape();
+				});
+			};
+
+			this.renderJoints = function (fbo) {
+				joints.forEach(function (id) {
+					joint = self.joints[id];
+					joint.shape.render(fbo);
+				});
+				self.head.shape.render(fbo);
+				self.handLeft.shape.render(fbo);
+				self.handRight.shape.render(fbo);
+			}
+
+			this.renderBones = function (fbo) {
+				members.forEach(function (id) {
+					bone = self.bones[id];
+					bone.shape.render(fbo);
+				});
+			};
+
+			this.renderPendulums = function (fbo) {
+				self.handLeft.pendulum.renderStrips(fbo);
+				self.handRight.pendulum.renderStrips(fbo);
+				/*
+self.handLeft.pendulum.renderSupportPoints(fbo);
+self.handRight.pendulum.renderSupportPoints(fbo);
+*/
+			}
+		};
+
+		function updateKinectSkeletons() {
+
+			activeTrackingObjects.forEach(function (trackingObject) {
+
+				if (!gl) {
+					return; // the used shapes need gl to init their vertex data
+				}
+
+				var body = trackingObject.body;
+				var skeleton = trackingObject.skeleton;
+
+				if (skeleton == null) {
+					skeleton = new KinectWebGLSkeletalModel(trackingObject);
+					trackingObject.skeleton = skeleton;
+				}
+
+				var p2d = {};
+				var p3d = {};
+				joints.forEach(function (id) {
+					var joint = skeleton.joints[id];
+					p3d.x = body.Joints[id].Position.X; // sry 2 lazy 2 refactor to upper case
+					p3d.y = body.Joints[id].Position.Y;
+					p3d.z = body.Joints[id].Position.Z;
+
+					project(p3d, p2d);
+
+					joint.updatePos({ x: p2d.x, y: p2d.y, z: p3d.z }); // z for what it's worth
+
+					var col = { r: 0, g: 0, b: 0, a: 0 };
+					switch (body.Joints[id].TrackingState) {
+						case 0:
+						case 1:
+							col = { r: 1, g: 0, b: 0, a: 1 };
+							break;
+						case 2:
+							col = { r: 0, g: 1, b: 0, a: 1 };
+							break;
+					}
+					joint.shape.innerColor = col;
+				});
+
+				var neckx = skeleton.joints.Neck.x;
+				var necky = skeleton.joints.Neck.y;
+				var headx = skeleton.joints.Head.x;
+				var heady = skeleton.joints.Head.y;
+
+				skeleton.head.shape.size = 3 * Math.sqrt((headx - neckx) * (headx - neckx) + (heady - necky) * (heady - necky));
+				skeleton.head.shape.cx = headx;
+				skeleton.head.shape.cy = heady;
+				skeleton.head.shape.update();
+
+				skeleton.handLeft.shape.innerColor = { r: 0, g: 0, b: 0, a: 0 }; // hand default: see through
+				if (body.handLeft.grab || body.handLeft.point) {
+					skeleton.handLeft.shape.innerColor = { r: 0, g: 0, b: 1, a: 1 }; // grab: blue
+					if (body.handLeft.point) {
+						skeleton.handLeft.shape.innerColor = { r: 0, g: 0, b: 1, a: 1 }; // point: blue
+					}
+				}
+
+				var x = body.handLeft.x;
+				var y = body.handLeft.y;
+				var z = body.handLeft.z;
+
+				skeleton.handLeft.updatePos({ x: x, y: y, z: z });
+
+				skeleton.handRight.shape.innerColor = { r: 0, g: 0, b: 0, a: 0 };
+				if (body.handRight.grab || body.handRight.point) {
+					skeleton.handRight.shape.innerColor = { r: 0, g: 0, b: 1, a: 1 };
+					if (body.handRight.point) {
+						skeleton.handRight.shape.innerColor = { r: 0, g: 0, b: 1, a: 1 };
+					}
+				}
+
+				x = body.handRight.x;
+				y = body.handRight.y;
+				z = body.handRight.z;
+
+				skeleton.handRight.updatePos({ x: x, y: y, z: z });
+
+				members.forEach(function (id) {
+					var bone = skeleton.bones[id];
+					var ts1 = body.Joints[id[0]].TrackingState;
+					var ts2 = body.Joints[id[1]].TrackingState;
+					var col = { r: 0, g: 0, b: 0, a: 0 };
+					if (ts1 == 2 && ts2 == 2) {
+						col = { r: 0, g: 1, b: 0, a: 1 };
+					}
+					bone.shape.innerColor = col;
+				});
+
+				skeleton.updateShapes();
+			});
+		}
+
+		function drawKinectSkeletonPendulums(fbo) {
+			activeTrackingObjects.forEach(function (trackingObject) {
+				var skeleton = trackingObject.skeleton;
+				skeleton.renderPendulums(fbo);
+			});
+		}
+
+		function drawKinectSkeletons(fbo) {
+			activeTrackingObjects.forEach(function (trackingObject) {
+				var skeleton = trackingObject.skeleton;
+				skeleton.renderJoints(fbo);
+				skeleton.renderBones(fbo);
+			});
+		}
+
+	</script>
+
+	<!-- most simple color patch material (for the pendulum triangle strip) -->
+
+	<script id="shader-vs-patch" type="x-shader/x-vertex">
+		attribute vec3 aPos;
+		attribute vec4 aCol;
+		varying vec4 col;
+		void main(void) {
+		gl_Position = vec4(aPos, 1.);
+		col = aCol;
+		}
+	</script>
+
+	<script id="shader-fs-patch" type="x-shader/x-fragment">
+		varying vec4 col;
+		void main(void) {
+		gl_FragColor = col;
+		}
+	</script>
+
+	<!-- Pendulum -->
+
+	<script type="text/javascript">
+
+		var StripShape = function (length) {
+
+			this.length = length;
+			this.additive = false;
+			this.newStreak = [];
+			this.oldStreak = [];
+
+			this.setStrip = function (newStreak, oldStreak) {
+				this.newStreak = newStreak;
+				this.oldStreak = oldStreak;
+				this.length = newStreak.length;
+			}
+
+			this.render = function (targetFBO) {
+				gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+				gl.useProgram(prog_patch);
+				// stride = 24, for 6 float values (xyrgba)
+				gl.vertexAttribPointer(this.aPosLoc, 2, gl.FLOAT, gl.FALSE, 24, 0);
+				gl.vertexAttribPointer(this.aColLoc, 4, gl.FLOAT, gl.FALSE, 24, 8);
+				gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+				if (targetFBO == null) {
+					gl.viewport(0, 0, viewX, viewY);
+				} else {
+					gl.viewport(0, 0, sizeX, sizeY);
+				}
+				gl.enable(gl.BLEND);
+				var blendMode = this.additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA;
+				gl.blendFunc(gl.SRC_ALPHA, blendMode);
+				gl.drawArrays(gl.TRIANGLE_STRIP, 0, this.length * 2);
+				gl.disable(gl.BLEND);
+			};
+
+			this.update = function () {
+				p2d = { x: 0, y: 0 };
+				for (var i = 0; i < this.newStreak.length; i++) {
+					project(this.newStreak[i], p2d);
+					this.data[i * 12 + 0] = p2d.x - 0.5;
+					this.data[i * 12 + 1] = -p2d.y + 0.5;
+					this.data[i * 12 + 2] = this.newStreak[i].col.r;
+					this.data[i * 12 + 3] = this.newStreak[i].col.g;
+					this.data[i * 12 + 4] = this.newStreak[i].col.b;
+					this.data[i * 12 + 5] = this.newStreak[i].col.a;
+					if (this.oldStreak[i]) {
+						project(this.oldStreak[i], p2d);
+						this.data[i * 12 + 6] = p2d.x - 0.5;
+						this.data[i * 12 + 7] = -p2d.y + 0.5;
+						this.data[i * 12 + 8] = this.newStreak[i].col.r; // at first, these were using the old streak colors but interpolation did not look as good as uniform over the strip width.
+						this.data[i * 12 + 9] = this.newStreak[i].col.g;
+						this.data[i * 12 + 10] = this.newStreak[i].col.b;
+						this.data[i * 12 + 11] = this.newStreak[i].col.a;
+					}
+				}
+				gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+				gl.bufferData(gl.ARRAY_BUFFER, this.data, gl.DYNAMIC_DRAW);
+			};
+
+			// create initial vertex data
+			rawData = [];
+			for (var i = 0; i < length * 2; i++) {
+				rawData.push(0, 0, 0, 0, 0, 0); // x, y, r, g, b, a
+			}
+			this.data = new Float32Array(rawData);
+			this.buffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+			gl.bufferData(gl.ARRAY_BUFFER, this.data, gl.DYNAMIC_DRAW);
+			this.aPosLoc = gl.getAttribLocation(prog_patch, "aPos");
+			this.aColLoc = gl.getAttribLocation(prog_patch, "aCol");
+			this.update();
+		}
+
+		var Pendulum = function () {
+
+			this.force = 0.0065;
+			this.grav = -0.00031;
+			this.speedFactor = 1;
+
+			this.friction = 30.; // 50
+
+			this.x = 0.5;
+			this.y = 0.2;
+			this.z = 0.;
+
+			this.points = []; // support points
+			for (i = 0; i < 4; i++) {
+				shape = new RegularShape(); // perhaps the visible support point shapes will be removed again later
+				shape.size = 0.01;
+				shape.numSides = 12;
+				shape.innerColor = { r: 1, g: 0, b: 0, a: 1 };
+				shape.update();
+				this.points[i] = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, shape: shape };
+			}
+
+			this.applySpringForce = function (i1, i2) {
+				fx = (this.points[i2].x - this.points[i1].x) * this.force;
+				fy = (this.points[i2].y - this.points[i1].y) * this.force;
+				fz = (this.points[i2].z - this.points[i1].z) * this.force;
+				this.points[i1].vx += fx;
+				this.points[i2].vx -= fx;
+				this.points[i1].vy += fy;
+				this.points[i2].vy -= fy;
+				this.points[i1].vz += fz;
+				this.points[i2].vz -= fz;
+			};
+
+			this.frame = 0;
+
+			(function advance(self) { // start physics simulation on construction time
+				// apply spring forces
+				for (i = 1; i < 4; i++) {
+					self.applySpringForce(i - 1, i);
+					var vx = self.points[i].vx;
+					var vy = self.points[i].vy;
+					var vz = self.points[i].vz;
+					var friction = Math.max(0, 1 - (vx * vx + vy * vy + vz * vz) * self.friction); // nonlinear quadratic
+					self.points[i].vx *= friction;
+					self.points[i].vy *= friction;
+					self.points[i].vz *= friction;
+					self.points[i].vy -= self.grav;
+					self.points[i].x += vx * self.speedFactor; // Verlet integration
+					self.points[i].y += vy * self.speedFactor;
+					self.points[i].z += vz * self.speedFactor;
+				}
+
+				// pin the first point back to the control position
+				self.points[0].x = self.x;
+				self.points[0].y = self.y;
+				self.points[0].z = self.z;
+
+				// add a new streak to the front of the history
+				if (self.stripShape != null) {
+
+					var newStreak = [];
+
+					x0 = self.points[0].x; // 4 control points
+					y0 = self.points[0].y;
+					z0 = self.points[0].z;
+					x1 = self.points[1].x;
+					y1 = self.points[1].y;
+					z1 = self.points[1].z;
+					x2 = self.points[2].x;
+					y2 = self.points[2].y;
+					z2 = self.points[2].z;
+					x3 = self.points[3].x;
+					y3 = self.points[3].y;
+					z3 = self.points[3].z;
+
+					for (i = 0; i < this.streakLength; i++) {
+						t = i / this.streakLength;
+						u = 1 - t;
+						// 6th degree Bernstein polynomial
+						var x = (P(t, 5) + 5 * P(t, 4) * u) * x0 + 10 * t * t * t * u * u * x1 + 10 * t * t * u * u * u * x2 + (5 * P(u, 4) * t + P(u, 5)) * x3;
+						var y = (P(t, 5) + 5 * P(t, 4) * u) * y0 + 10 * t * t * t * u * u * y1 + 10 * t * t * u * u * u * y2 + (5 * P(u, 4) * t + P(u, 5)) * y3;
+						var z = (P(t, 5) + 5 * P(t, 4) * u) * z0 + 10 * t * t * t * u * u * z1 + 10 * t * t * u * u * u * z2 + (5 * P(u, 4) * t + P(u, 5)) * z3;
+						newStreak[i] = { x: x, y: y, z: z, frame: self.frame, col: { r: 1, g: 1, b: 1, a: 1 } }; // init white
+					}
+
+					self.pushStreak(newStreak);
+					self.streakIndex++;
+				}
+
+				// advance frame counter
+				self.frame++;
+
+				setTimeout(advance, 1000 / 240, self);
+			})(this);
+
+			this.streakLength = 256; // number of "pixels"
+			this.streakIndex = 0; // column counter for persistence of vision from bitmap or procedurally generated imagery
+			this.stripShape = null; // the permanent WebGL renderable
+			this.streakHistory = []; // the nonpermanent frame data array history queue
+			this.historyLength = 2;
+			this.pushStreak = function (streak) {
+				this.streakHistory = [streak].concat(this.streakHistory.slice(0, this.historyLength - 1)); // new streak goes in first, truncate history
+				this.endpointHistory = [{ x: this.points[3].x, y: this.points[3].y, z: this.points[3].z }].concat(this.endpointHistory.slice(0, this.historyLength - 1));
+			}
+
+			this.initStreaks = function (streakLength, historyLength) {
+				this.streakLength = streakLength;
+				this.stripShape = new StripShape(this.streakLength);
+				this.endpointHistory = [];
+				this.historyLength = historyLength;
+			}
+
+			this.patterns = [];
+			this.patterns["transparent"] = function (frame, pos, age, col) {
+				col.r = 1;
+				col.g = 1;
+				col.b = 1;
+				col.a = 0;
+			};
+
+			this.patterns["white"] = function (frame, pos, age, col) {
+				col.r = 1;
+				col.g = 1;
+				col.b = 1;
+				col.a = 1;
+			};
+
+			this.patterns["white fadeout"] = function (frame, pos, age, col) {
+				col.r = 1;
+				col.g = 1;
+				col.b = 1;
+				col.a = (1 - age / historyLength);
+			};
+
+			this.patterns["white stripes"] = function (frame, pos, age, col) {
+				var pattern1 = (pos) % 4 == 0;
+				var pattern2 = (pos + 1) % 4 == 0;
+				var pattern = Math.max(pattern1, pattern2);
+				col.r = pattern;
+				col.g = pattern;
+				col.b = pattern;
+				col.a = (pattern - age / historyLength);
+			};
+
+			this.patterns["domain map"] = function (frame, pos, age, col) {
+				var x = (frame % 64) / 64;
+				var y = 2 * pos / this.streakLength;
+
+				col.r = x;
+				col.g = y;
+				col.b = 0;
+				col.a = (1 - 0.5 * age / historyLength);
+			};
+
+			this.patterns["rgb sines"] = function (frame, pos, age, col) {
+				var x = (frame % 64) / 64;
+				var y = 2 * pos / this.streakLength;
+
+				var thickness = 0.05;
+				var frequency = 0.25;
+				var amplitude = 0.33;
+
+				var sine1 = Math.sin(frame * frequency) * amplitude + 0.5;
+				var sine1Mask = (y - sine1 - thickness < 0) * (y - sine1 + thickness > 0);
+
+				var sine2 = Math.sin(frame * frequency + Math.PI * 2 / 3) * amplitude + 0.5;
+				var sine2Mask = (y - sine2 - thickness < 0) * (y - sine2 + thickness > 0);
+
+				var sine3 = Math.sin(frame * frequency - Math.PI * 2 / 3) * amplitude + 0.5;
+				var sine3Mask = (y - sine3 - thickness < 0) * (y - sine3 + thickness > 0);
+
+				col.r = sine1Mask;
+				col.g = sine2Mask;
+				col.b = sine3Mask;
+
+				var alphaMask = Math.max(sine1Mask, Math.max(sine2Mask, sine3Mask));
+				col.a = alphaMask;
+			};
+
+			this.patterns["cmy sines"] = function (frame, pos, age, col) {
+				var x = (frame % 64) / 64;
+				var y = 2 * pos / this.streakLength;
+
+				var thickness = 0.05;
+				var frequency = 0.25;
+				var amplitude = 0.33;
+
+				var sine1 = Math.sin(frame * frequency) * amplitude + 0.5;
+				var sine1Mask = (y - sine1 - thickness < 0) * (y - sine1 + thickness > 0);
+
+				var sine2 = Math.sin(frame * frequency + Math.PI * 2 / 3) * amplitude + 0.5;
+				var sine2Mask = (y - sine2 - thickness < 0) * (y - sine2 + thickness > 0);
+
+				var sine3 = Math.sin(frame * frequency - Math.PI * 2 / 3) * amplitude + 0.5;
+				var sine3Mask = (y - sine3 - thickness < 0) * (y - sine3 + thickness > 0);
+
+				col.r = sine1Mask + sine2Mask;
+				col.g = sine2Mask + sine3Mask;
+				col.b = sine3Mask + sine1Mask;
+
+				var alphaMask = Math.max(sine1Mask, Math.max(sine2Mask, sine3Mask));
+				col.a = alphaMask;
+			};
+
+			this.patterns["compartments"] = function (frame, pos, age, col) {
+				var y = pos / this.streakLength;
+				var bandThickness = 0.05;
+
+				// baseline
+				var band1Pos = 0.5;
+				var thickness = 0.015;
+				var band1Mask = (y - band1Pos - thickness < 0) * (y - band1Pos + thickness > 0);
+
+				// divide
+				var width = 24;
+				var index = frame % width;
+				var divide = (index == 0) ? 1 : 0;
+
+
+				col.r = band1Mask + divide;
+				col.g = band1Mask + divide;
+				col.b = band1Mask + divide;
+
+				var alphaMask = Math.max(band1Mask, Math.max(divide, 0));
+				col.a = alphaMask;
+			};
+
+			this.patterns["heart"] = function (frame, pos, age, col) {
+				var y = pos / this.streakLength;
+				var bandThickness = 0.05;
+
+				var dotMask = (frame % 2 == 0 && pos % 2 == 0) ? 1 : 0;
+
+				// baseline
+				var band1Pos = 0.6;
+				var thickness = 0.015;
+				var band1Mask = (y - band1Pos - thickness < 0) * (y - band1Pos + thickness > 0);
+
+				// divide compartments
+				var num = 8;
+				var width = 24;
+				var index = frame % width;
+				var divide = (index == 0) ? 1 : 0;
+
+				var heartFrame = ((frame - index) / width % num == 0) ? 1 : 0;
+				var cx = index / width - 0.5;
+				var cy = (y - band1Pos) * 3 + Math.abs(index / width - 0.5) * 0.7;
+				var d = Math.sqrt(cx * cx + cy * cy);
+				var ang = Math.atan2(cy, cx);
+
+				var heartMask = (d < 0.5) ? heartFrame : 0;
+
+				heartFrame = heartMask;
+
+				col.r = band1Mask + divide + heartFrame;
+				col.g = band1Mask + divide + heartFrame;
+				col.b = band1Mask + divide + heartFrame;
+
+				var alphaMask = Math.max(band1Mask, Math.max(divide, heartFrame * (1 + 0 * dotMask)));
+				col.a = alphaMask;
+			};
+
+			this.applyColor = this.patterns["white fadeout"]; // replace this anytime at runtime
+
+			function P(m, e) {
+				return Math.pow(m, e);
+			}
+
+			this.lastRenderFrame = 0;
+
+			this.renderStrips = function (fbo) {
+
+				var framesSinceLastRender = this.frame - this.lastRenderFrame;
+				this.lastRenderFrame = this.frame;
+
+				var stripsToRender = Math.min(this.streakHistory.length, framesSinceLastRender + 1);
+
+				// apply colors
+				for (i = 0; i < stripsToRender; i++) {
+					var streak = this.streakHistory[i];
+					for (pos = 0; pos < this.streakLength; pos++) {
+						if (streak[pos] != undefined) {
+							this.applyColor(streak[pos].frame, pos, i, streak[pos].col);
+						}
+					}
+				}
+
+				// render history from last to first for correct overlay
+				for (i = stripsToRender - 1; i > 0; i--) {
+					var oldStreak = this.streakHistory[i];
+					var newStreak = this.streakHistory[i - 1];
+					this.stripShape.setStrip(newStreak, oldStreak);
+					this.stripShape.update();
+					this.stripShape.render(fbo);
+				}
+
+			}
+
+			// the other visualization
+
+			this.numSpringPoints = 1024;
+			this.springPoints = [];
+
+			this.initSpringPoints = function (num) {
+				this.numSpringPoints = num;
+				for (i = 0; i < this.numSpringPoints; i++) {
+					t = i / this.numSpringPoints;
+					var point = this.springPoints[i] = { x: t, y: t };
+					if (i > 0) {
+						var line = point.line = new LineShape();
+						line.thickness = 0.002;
+					}
+				}
+			}
+
+			this.renderSpringPoints = function (fbo) {
+				var p2d = {};
+				project(this.points[0], p2d);
+				old_x = new_x = x0 = p2d.x;
+				old_y = new_y = y0 = p2d.y;
+
+				project(this.points[1], p2d);
+				x1 = p2d.x;
+				y1 = p2d.y;
+
+				project(this.points[2], p2d);
+				x2 = p2d.x;
+				y2 = p2d.y;
+
+				project(this.points[3], p2d);
+				x3 = p2d.x;
+				y3 = p2d.y;
+
+				for (i = 0; i < this.numSpringPoints; i++) {
+
+					t = i / this.numSpringPoints;
+					u = 1 - t;
+
+					new_x = (P(t, 5) + 5 * P(t, 4) * u) * x0 + 10 * t * t * t * u * u * x1 + 10 * t * t * u * u * u * x2 + (5 * P(u, 4) * t + P(u, 5)) * x3;
+					new_y = (P(t, 5) + 5 * P(t, 4) * u) * y0 + 10 * t * t * t * u * u * y1 + 10 * t * t * u * u * u * y2 + (5 * P(u, 4) * t + P(u, 5)) * y3;
+
+					d = t * u * Math.sin(t * 200) / Math.sqrt(P(new_x - old_x, 2) + P(new_y - old_y, 2)) * 0.1;
+
+					var point = this.springPoints[i];
+
+					new_spring_x = point.x = new_x + (old_y - new_y) * d;
+					new_spring_y = point.y = new_y - (old_x - new_x) * d;
+
+					var line = point.line;
+
+					if (line != null) {
+						line.x1 = old_spring_x;
+						line.y1 = old_spring_y;
+						line.x2 = new_spring_x;
+						line.y2 = new_spring_y;
+
+						line.update();
+						line.render(fbo);
+					}
+
+					old_x = new_x;
+					old_y = new_y;
+
+					old_spring_x = new_spring_x;
+					old_spring_y = new_spring_y;
+				}
+			};
+
+			this.renderSupportPoints = function (fbo) {
+				var p2d = {};
+				for (i = 0; i < 4; i++) {
+					project(this.points[i], p2d);
+					var shape = this.points[i].shape;
+					shape.cx = p2d.x;
+					shape.cy = 1 - p2d.y;
+					shape.update();
+					shape.render(fbo);
+				}
+			};
+		}
+	</script>
+
+	<!-- WebGL setup goes here -->
+	<script id="shader-vs" type="x-shader/x-vertex">
+		attribute vec3 aPos;
+		attribute vec2 aTexCoord;
+		varying   vec2 uv;
+		varying vec2 uv_orig;
+		void main(void) {
+		gl_Position = vec4(aPos, 1.);
+		uv = aTexCoord;
+		uv_orig = uv;
+		}
+	</script>
+
+	<script id="shader-fs-inc" type="x-shader/x-fragment">
+		#ifdef GL_ES
+		precision mediump float;
+		#endif
+
+		varying vec2 uv;
+		varying vec2 uv_orig;
+
+		uniform vec2 texSize;
+		uniform vec2 pixelSize;
+
+		uniform vec4 fader;
+        uniform vec4 buttons;
+        uniform vec4 oldButtons;
+
+		uniform vec4 mover0;
+		uniform vec4 pendulum0;
+		uniform int moverState0;
+
+		uniform vec4 mover1;
+		uniform vec4 pendulum1;
+		uniform int moverState1;
+
+		uniform vec4 mover2;
+		uniform vec4 pendulum2;
+		uniform int moverState2;
+
+		uniform vec4 mover3;
+		uniform vec4 pendulum3;
+		uniform int moverState3;
+
+		uniform vec4 mover4;
+		uniform vec4 pendulum4;
+		uniform int moverState4;
+
+		uniform vec4 mover5;
+		uniform vec4 pendulum5;
+		uniform int moverState5;
+
+		uniform vec4 mover6;
+		uniform vec4 pendulum6;
+		uniform int moverState6;
+
+		uniform vec4 mover7;
+		uniform vec4 pendulum7;
+		uniform int moverState7;
+
+		uniform vec4 mover8;
+		uniform vec4 pendulum8;
+		uniform int moverState8;
+
+		uniform vec4 mover9;
+		uniform vec4 pendulum9;
+		uniform int moverState9;
+
+		uniform vec2 head0;
+		uniform vec4 col0;
+
+		uniform vec2 head1;
+		uniform vec4 col1;
+
+		uniform vec2 head2;
+		uniform vec4 col2;
+
+		uniform vec2 head3;
+		uniform vec4 col3;
+
+		uniform vec2 head4;
+		uniform vec4 col4;
+
+		uniform vec2 head5;
+		uniform vec4 col5;
+
+		vec2 uv_zoom_exp(vec2 uv, vec2 center, vec2 aspect, float zoom, float zoom_exp, float zoom_factor){
+		vec2 uv_correct = 0.5 + (uv -0.5)* aspect;
+		vec2 center_correct = 0.5 + ( center - 0.5) * aspect;
+		vec2 zoom_distorted = center_correct + (uv_correct - center_correct)*(1. - zoom * pow(zoom_exp, zoom_factor*length(uv_correct-center_correct)));
+
+		return 0.5 + (zoom_distorted - 0.5) / aspect;
+		}
+
+		bool is_onscreen(vec2 uv){
+		return (uv.x < 1.) && (uv.x > 0.) && (uv.y < 1.) && (uv.y > 0.);
+		}
+
+		float filter(vec2 uv, vec2 pos){
+		return clamp( 1.-length((uv-pos)*texSize)/2., 0. , 1.);
+		}
+
+
+		float border(vec2 uv, float border, vec2 texSize){
+		uv*=texSize;
+		return (uv.x
+		<border || uv.x>
+			texSize.x-border || uv.y<border || uv.y>
+				texSize.y-border) ? 1.:.0;
+				}
+
+				#define pi 3.141592653589793238462643383279
+				#define pi_inv 0.318309886183790671537767526745
+				#define pi2_inv 0.159154943091895335768883763372
+
+				float border(vec2 domain, float thickness){
+				vec2 uv = fract(domain-vec2(0.5));
+				uv = min(uv,1.-uv)*2.;
+				return clamp(max(uv.x,uv.y)-1.+thickness,0.,1.)/(thickness);
+				}
+
+				float square_mask(vec2 domain){
+				return (domain.x <= 1. && domain.x >= 0. && domain.y <= 1. && domain.y >= 0.) ? 1. : 0.;
+				}
+
+				vec2 complex_mul(vec2 factorA, vec2 factorB){
+				return vec2( factorA.x*factorB.x - factorA.y*factorB.y, factorA.x*factorB.y + factorA.y*factorB.x);
+				}
+
+				vec2 spiralzoom(vec2 domain, vec2 center, float n, float spiral_factor, float zoom_factor, vec2 pos){
+				vec2 uv = domain - center;
+				float d = length(uv);
+				return vec2( atan(uv.y, uv.x)*n*pi2_inv + d*spiral_factor, -log(d)*zoom_factor) + pos;
+				}
+
+				vec2 complex_div(vec2 numerator, vec2 denominator){
+				return vec2( numerator.x*denominator.x + numerator.y*denominator.y,
+				numerator.y*denominator.x - numerator.x*denominator.y)/
+				vec2(denominator.x*denominator.x + denominator.y*denominator.y);
+				}
+
+				// HSL to RGB converter code from http://www.gamedev.net/topic/465948-hsl-shader-glsl-code/
+				float Hue_2_RGB(float v1, float v2, float vH )
+				{
+				float ret;
+				if ( vH < 0.0 )
+				vH += 1.0;
+				if ( vH > 1.0 )
+				vH -= 1.0;
+				if ( ( 6.0 * vH ) < 1.0 )
+				ret = ( v1 + ( v2 - v1 ) * 6.0 * vH );
+				else if ( ( 2.0 * vH ) < 1.0 )
+				ret = ( v2 );
+				else if ( ( 3.0 * vH ) < 2.0 )
+				ret = ( v1 + ( v2 - v1 ) * ( ( 2.0 / 3.0 ) - vH ) * 6.0 );
+				else
+				ret = v1;
+				return ret;
+				}
+
+				vec3 hsl2rgb(float H, float S, float L){
+				float var_2, var_1, R, G, B;
+				if (S == 0.0)
+				{
+				R = L;
+				G = L;
+				B = L;
+				}
+				else
+				{
+				if ( L < 0.5 )
+				{
+				var_2 = L * ( 1.0 + S );
+				}
+				else
+				{
+				var_2 = ( L + S ) - ( S * L );
+				}
+
+				var_1 = 2.0 * L - var_2;
+
+				R = Hue_2_RGB( var_1, var_2, H + ( 1.0 / 3.0 ) );
+				G = Hue_2_RGB( var_1, var_2, H );
+				B = Hue_2_RGB( var_1, var_2, H - ( 1.0 / 3.0 ) );
+				}
+				return vec3(R,G,B);
+				}
+
+				vec2 gradient(sampler2D sampler, vec2 uv, vec2 d, vec4 selector){
+				vec4 dX = 0.5*texture2D(sampler, uv + vec2(1.,0.)*d) - 0.5*texture2D(sampler, uv - vec2(1.,0.)*d);
+				vec4 dY = 0.5*texture2D(sampler, uv + vec2(0.,1.)*d) - 0.5*texture2D(sampler, uv - vec2(0.,1.)*d);
+				return vec2( dot(dX, selector), dot(dY, selector) );
+				}
+
+				vec2 rot90(vec2 vector){
+				return vector.yx*vec2(1,-1);
+				}
+
+				float circle(vec2 uv, vec2 aspect, float scale){
+				return clamp( 1. - length((uv-0.5)*aspect*scale), 0., 1.);
+				}
+
+				float sigmoid(float x) {
+				return 2./(1. + exp2(-x)) - 1.;
+				}
+
+				float smoothcircle(vec2 uv, vec2 aspect, float radius, float ramp){
+				return 0.5 - sigmoid( ( length( (uv - 0.5) * aspect) - radius) * ramp) * 0.5;
+				}
+
+	</script>
+
+	<script id="shader-fs-copy" type="x-shader/x-fragment">
+		uniform sampler2D source;
+		void main(void) {
+		gl_FragColor = texture2D(source, uv);
+		}
+	</script>
+
+	<script id="shader-fs-init" type="x-shader/x-fragment">
+		void main(void){
+		gl_FragColor = vec4(0.);
+		}
+	</script>
+
+	<script id="shader-fs-move-particles" type="x-shader/x-fragment">
+		uniform sampler2D sampler_prev;
+		uniform sampler2D sampler_prev_n;
+		uniform sampler2D sampler_blur;
+		uniform sampler2D sampler_blur2;
+		uniform sampler2D sampler_blur3;
+		uniform sampler2D sampler_blur4;
+		uniform sampler2D sampler_blur5;
+		uniform sampler2D sampler_blur6;
+		uniform sampler2D sampler_noise;
+		uniform sampler2D sampler_noise_n;
+		uniform sampler2D sampler_fluid;
+		uniform sampler2D sampler_particles;
+
+		uniform vec2 scale;
+		uniform vec4 rnd;
+		uniform float frame;
+		uniform vec2 mouse;
+		uniform vec2 mouseV;
+
+		void main(void){
+		vec4 p = texture2D(sampler_particles, uv); // residual location and velocity of the particle in the previous frame
+		vec2 f = texture2D(sampler_fluid, p.xy).xz*pixelSize; // fluid simulation flow vector
+		vec4 noise = texture2D(sampler_noise, p.xy)*2. - vec4(1.);
+
+		// apply forces
+		p.zw += gradient(sampler_blur6, p.xy, pixelSize*64., vec4(-1.,1.75,0.,0.))*pixelSize; // gradients from red and green
+		p.zw = p.zw * max(0., 1.- (p.z*p.z + p.w*p.w)*32.); // (non-linear) friction
+
+		p.xy += p.zw; // verlet integration
+
+		vec2 oo = vec2(0);
+		oo += gradient(sampler_prev, p.xy, pixelSize*1., vec4(-32.,0,0.,0.))*pixelSize; // move away from red, accurate
+		oo += gradient(sampler_blur, p.xy, pixelSize*4., vec4(4.,0,0.,0.))*pixelSize; // move toward red, smooth
+		oo += rot90(gradient(sampler_blur2, p.xy, pixelSize*8., vec4(-8.,0,0.,0.)))*pixelSize; // move orthogonal to the gradient
+
+		p.xy += f+oo; // fluid + other offset
+
+		/*
+		float bounce = 0.999;
+
+		if(p.x < 0.){
+		p.x = 0.;
+		p.z = abs(p.z)*bounce;
+		}else if(p.x > 1.){
+		p.x = 1.;
+		p.z = -abs(p.z)*bounce;
+		}
+
+		if(p.y < 0.){
+		p.y = 0.;
+		p.w = abs(p.w)*bounce;
+		}else if(p.y > 1.){
+		p.y = 1.;
+		p.w = -abs(p.w)*bounce;
+		}
+
+		gl_FragColor = p; // write back
+		*/
+		gl_FragColor.xy = fract(p.xy); // wrap
+
+		gl_FragColor.zw = p.zw;
+		}
+	</script>
+
+	<script id="shader-fs-advance" type="x-shader/x-fragment">
+		uniform sampler2D sampler_prev;
+		uniform sampler2D sampler_prev_n;
+		uniform sampler2D sampler_blur;
+		uniform sampler2D sampler_blur2;
+		uniform sampler2D sampler_blur3;
+		uniform sampler2D sampler_blur4;
+		uniform sampler2D sampler_blur5;
+		uniform sampler2D sampler_blur6;
+		uniform sampler2D sampler_noise;
+		uniform sampler2D sampler_noise_n;
+		uniform sampler2D sampler_fluid;
+		uniform sampler2D sampler_particles;
+		uniform sampler2D sampler_particle_projection;
+		uniform sampler2D sampler_skeletons;
+
+		uniform vec4 rnd;
+		uniform vec4 rainbow;
+		uniform vec2 aspect;
+		uniform vec2 mouse;
+		uniform vec2 mouseV;
+		uniform float fps;
+		uniform float time;
+		uniform float frame;
+
+		void main(void) {
+            vec2 fluid = texture2D(sampler_fluid, uv).xz*2.*pixelSize;
+
+		    //zooms on head position;
+            float zoom = 1./1.;
+            float zoom_exp = 1./6.;
+            float zoom_factor = 16.;
+
+            vec2 uvr = uv - fluid;//*0.5;
+
+            float linear_zoom = 0.0025;
+
+            float cum_a = col0.a + col1.a + col2.a + col3.a + col4.a + col5.a;
+		
+		    if(col0.a == 1.){
+                vec2 p = head0.xy;
+                uvr = p + (uvr - p.xy)*(1. - linear_zoom/cum_a);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, zoom, zoom_exp, zoom_factor);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+		    }
+		    if(col1.a == 1.){
+                vec2 p = head1.xy;
+                uvr = p + (uvr - p.xy)*(1. - linear_zoom/cum_a);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, zoom, zoom_exp, zoom_factor);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+		    }
+		    if(col2.a == 1.){
+                vec2 p = head2.xy;
+                uvr = p + (uvr - p.xy)*(1. - linear_zoom/cum_a);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, zoom, zoom_exp, zoom_factor);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+		    }
+		    if(col3.a == 1.){
+                vec2 p = head3.xy;
+                uvr = p + (uvr - p.xy)*(1. - linear_zoom/cum_a);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, zoom, zoom_exp, zoom_factor);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+		    }
+		    if(col4.a == 1.){
+                vec2 p = head4.xy;
+                uvr = p + (uvr - p.xy)*(1. - linear_zoom/cum_a);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, zoom, zoom_exp, zoom_factor);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+		    }
+		    if(col5.a == 1.){
+                vec2 p = head5.xy;
+                uvr = p + (uvr - p.xy)*(1. - linear_zoom/cum_a);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, zoom, zoom_exp, zoom_factor);
+        	    uvr = uv_zoom_exp(uvr, p, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+		    }
+        
+            /*
+		    uvr = mouse + (uvr - mouse)*(1. - linear_zoom/cum_a);
+            uvr = uv_zoom_exp(uvr, mouse, aspect, zoom, zoom_exp, zoom_factor); 
+       	    uvr = uv_zoom_exp(uvr, mouse, aspect, -zoom*0.4, zoom_exp, zoom_factor*0.55);
+            */
+        
+        // green: very soft reaction-diffusion (skin dot synthesis simulation)
+ 
+        vec4 noise = texture2D(sampler_noise, uvr + rnd.xy) - 0.5; // the noise texture itself is static. adding randomizing 
+
+        gl_FragColor.y = texture2D(sampler_prev, uvr).y + (noise.x)*0.0035; // a dash of error diffusion;
+        gl_FragColor.y += (texture2D(sampler_prev, uvr).y-texture2D(sampler_blur4, uvr).y)*0.0133; // sort of a Laplacian
+  
+        // ^^ yes, that is all the magic for green.
+  
+        // blue: just another reaction-diffusion with green as inhibitor, also different color gradients are used as plane deformation vector
+  
+        vec2 d = pixelSize*8.;
+        vec2 gy; // gradient in green
+        gy.x = texture2D(sampler_blur2, uv_orig-vec2(1.,0.)*d).y - texture2D(sampler_blur2, uv_orig+vec2(1.,0.)*d).y;
+        gy.y = texture2D(sampler_blur2, uv_orig-vec2(0.,1.)*d).y - texture2D(sampler_blur2, uv_orig+vec2(0.,1.)*d).y;
+
+        d = pixelSize*4.;
+        vec2 gz; // gradient in blue
+        gz.x = texture2D(sampler_blur, uv_orig-vec2(1.,0.)*d).z - texture2D(sampler_blur, uv_orig+vec2(1.,0.)*d).z;
+        gz.y = texture2D(sampler_blur, uv_orig-vec2(0.,1.)*d).z - texture2D(sampler_blur, uv_orig+vec2(0.,1.)*d).z;
+
+        uvr += gy.yx*vec2(1.,-1.)*pixelSize*4. //gradient in green rotated by 90 degree
+        - gy*pixelSize*16. // gradient in green
+        - gz*pixelSize*0.25 // gradient of blue - makes the "traveling wave fronts" usually
+        + gz.yx*vec2(-1.,1.)*pixelSize*4.; // rotated gradient of blue - makes the painterly effect here
+        gl_FragColor.z = texture2D(sampler_prev, uvr).z + noise.z*0.12; // error diffusion
+        gl_FragColor.z += (texture2D(sampler_prev, uvr).z-texture2D(sampler_blur3, uvr).z)*0.11; // teh magic :P
+
+        gl_FragColor.z +=  - (gl_FragColor.y-0.02)*.025;
+
+        // that's all for blue ^^
+        // since this became such a beauty, the code for red is mostly a copy, but the inhibitor is inverted to the absence of green
+
+        vec2 gx; // gradient in blue
+        gx.x = texture2D(sampler_blur, uv_orig-vec2(1.,0.)*d).x - texture2D(sampler_blur, uv_orig+vec2(1.,0.)*d).x;
+        gx.y = texture2D(sampler_blur, uv_orig-vec2(0.,1.)*d).x - texture2D(sampler_blur, uv_orig+vec2(0.,1.)*d).x;
+
+        uvr += - gy.yx*vec2(1.,-1.)*pixelSize*8. //gradient in green rotated by 90 degree
+        + gy*pixelSize*32. // gradient in green
+        - gx*pixelSize*0.25 // gradient of red - makes the "traveling wave fronts" usually
+        - gx.yx*vec2(-1.,1.)*pixelSize*4.; // rotated gradient of red - makes the painterly effect here
+        gl_FragColor.x = texture2D(sampler_prev, uvr).x + noise.x*0.12; // error diffusion
+        gl_FragColor.x += (texture2D(sampler_prev, uvr).x-texture2D(sampler_blur3, uvr).x)*0.11; // reaction diffusion
+
+        gl_FragColor.x +=  - ((1.-gl_FragColor.y)-0.02)*.025;
+
+	    gl_FragColor.a = 1.;
+        gl_FragColor = clamp(gl_FragColor, 0. , 1.);
+
+		gl_FragColor.a = 1.;
+		}
+	</script>
+
+	<script id="shader-fs-composite" type="x-shader/x-fragment">
+		uniform sampler2D sampler_prev;
+		uniform sampler2D sampler_prev_n;
+		uniform sampler2D sampler_blur;
+		uniform sampler2D sampler_blur2;
+		uniform sampler2D sampler_blur3;
+		uniform sampler2D sampler_blur4;
+		uniform sampler2D sampler_blur5;
+		uniform sampler2D sampler_blur6;
+		uniform sampler2D sampler_noise;
+		uniform sampler2D sampler_noise_n;
+		uniform sampler2D sampler_fluid;
+		uniform sampler2D sampler_fluid_p;
+		uniform sampler2D sampler_particles;
+		uniform sampler2D sampler_particle_projection;
+		uniform sampler2D sampler_skeletons;
+
+		uniform vec4 rnd;
+		uniform vec4 rainbow;
+		uniform vec2 aspect;
+		uniform vec2 mouse;
+		uniform vec2 mouseV;
+		uniform float fps;
+		uniform float time;
+		uniform float frame;
+		
+		vec2 uv_water(vec2 domain, float horizon, float offset, vec2 v, float strength){
+			vec2 c = domain-vec2(0.5,1.-horizon);
+			float z = 2.5/c.y;
+			vec2 uv_water = vec2(c.x*z*horizon,z*horizon)*0.25+v;
+			float mask = float((c.y>0.));
+			uv_water = (texture2D(sampler_noise,fract(uv_water*0.1)).xy-0.5)*vec2(mask)*vec2(1.,2.);
+			vec2 uv_mirror = 1.0-abs(fract((c+vec2(0.5,1.))*0.5)*2.-1.)+vec2(0.,-offset);
+			return fract(uv_mirror-uv_water.xy*strength);
+		}
+
+		void main(void) {
+            gl_FragColor = vec4(1.-abs(texture2D(sampler_prev, uv).y*2.-1.));
+
+            vec2 uv = uv + gradient(sampler_skeletons, uv, pixelSize*1., vec4(0,-1.,0,0))*pixelSize;
+
+            vec2 d = pixelSize*1.;
+            vec2 gy; // green pixel gradient vector
+            gy.x = texture2D(sampler_prev, uv-vec2(1.,0.)*d).y - texture2D(sampler_prev, uv+vec2(1.,0.)*d).y;
+            gy.y = texture2D(sampler_prev, uv-vec2(0.,1.)*d).y - texture2D(sampler_prev, uv+vec2(0.,1.)*d).y;
+
+            d = pixelSize*4.;
+
+            vec2 gz; // blue blur2 gradient vector
+            gz.x += texture2D(sampler_blur2, uv-vec2(1.,0.)*d).z - texture2D(sampler_blur2, uv+vec2(1.,0.)*d).z;
+            gz.y += texture2D(sampler_blur2, uv-vec2(0.,1.)*d).z - texture2D(sampler_blur2, uv+vec2(0.,1.)*d).z;
+
+            gl_FragColor = vec4(0.);
+
+            gl_FragColor.y = texture2D(sampler_prev, uv + gz*pixelSize*64.).y*0.4 - (gz.x + gz.y)*0.4 + 0.4; // gradient enhancement and refraction
+            gl_FragColor.z = texture2D(sampler_blur4, uv + 4.*gy - gz ).z*1.75 -0.0; // scatter/refract
+
+            gl_FragColor.yz *= 1.- texture2D(sampler_blur4, uv).x*2.5; // box shadow
+            gl_FragColor.x = texture2D(sampler_prev, uv).x*1.+0.25; // repaint over shadow
+  
+            gl_FragColor.y += gl_FragColor.x; // red -> yellow
+
+            gl_FragColor.yz *= vec2(0.75,1.)- texture2D(sampler_blur4, uv).z*1.5; // shadow
+            gl_FragColor.z += texture2D(sampler_prev, uv).z*1.5; // repaint over shadow
+            gl_FragColor.y += gl_FragColor.z*0.5 - 0.1; // blue -> cyan
+
+            /*
+            gl_FragColor = mix(gl_FragColor, col0, clamp( 1. - length( (uv_zoom - head0) * aspect.xy) / 0.1, 0., 1.) * col0.a); // simple head position visualization
+            gl_FragColor = mix(gl_FragColor, col1, clamp( 1. - length( (uv_zoom - head1) * aspect.xy) / 0.1, 0., 1.) * col1.a);
+            gl_FragColor = mix(gl_FragColor, col2, clamp( 1. - length( (uv_zoom - head2) * aspect.xy) / 0.1, 0., 1.) * col2.a);
+            gl_FragColor = mix(gl_FragColor, col3, clamp( 1. - length( (uv_zoom - head3) * aspect.xy) / 0.1, 0., 1.) * col3.a);
+            gl_FragColor = mix(gl_FragColor, col4, clamp( 1. - length( (uv_zoom - head4) * aspect.xy) / 0.1, 0., 1.) * col4.a);
+            gl_FragColor = mix(gl_FragColor, col5, clamp( 1. - length( (uv_zoom - head5) * aspect.xy) / 0.1, 0., 1.) * col5.a);
+            */
+
+            gl_FragColor = mix(gl_FragColor, vec4(0), texture2D(sampler_skeletons, uv + vec2(3,3)*pixelSize).y );
+            gl_FragColor = mix(gl_FragColor, vec4(1), texture2D(sampler_skeletons, uv).y );
+            
+            //gl_FragColor = texture2D(sampler_prev, uv); // bypass
+
+            gl_FragColor *= fader; // channel enablement
+            //gl_FragColor.g = 0.;
+            gl_FragColor.a = 1.;
+		}
+	</script>
+
+	<script id="shader-fs-blur-horizontal" type="x-shader/x-fragment">
+		// original shader from http://www.gamerendering.com/2008/10/11/gaussian-blur-filter-shader/
+		// horizontal blur fragment shader
+		uniform sampler2D src_tex;
+
+		void main(void) // fragment
+		{
+		float h = pixelSize.x;
+		vec4 sum = vec4(0.0);
+		sum += texture2D(src_tex, vec2(uv.x - 4.0*h, uv.y) ) * 0.05;
+		sum += texture2D(src_tex, vec2(uv.x - 3.0*h, uv.y) ) * 0.09;
+		sum += texture2D(src_tex, vec2(uv.x - 2.0*h, uv.y) ) * 0.12;
+		sum += texture2D(src_tex, vec2(uv.x - 1.0*h, uv.y) ) * 0.15;
+		sum += texture2D(src_tex, vec2(uv.x + 0.0*h, uv.y) ) * 0.16;
+		sum += texture2D(src_tex, vec2(uv.x + 1.0*h, uv.y) ) * 0.15;
+		sum += texture2D(src_tex, vec2(uv.x + 2.0*h, uv.y) ) * 0.12;
+		sum += texture2D(src_tex, vec2(uv.x + 3.0*h, uv.y) ) * 0.09;
+		sum += texture2D(src_tex, vec2(uv.x + 4.0*h, uv.y) ) * 0.05;
+		gl_FragColor.xyz = sum.xyz/0.98; // normalize
+		gl_FragColor.a = 1.;
+		}
+	</script>
+
+	<script id="shader-fs-blur-vertical" type="x-shader/x-fragment">
+		uniform sampler2D src_tex;
+
+		void main(void) // fragment
+		{
+		float v = pixelSize.y;
+		vec4 sum = vec4(0.0);
+		sum += texture2D(src_tex, vec2(uv.x, - 4.0*v + uv.y) ) * 0.05;
+		sum += texture2D(src_tex, vec2(uv.x, - 3.0*v + uv.y) ) * 0.09;
+		sum += texture2D(src_tex, vec2(uv.x, - 2.0*v + uv.y) ) * 0.12;
+		sum += texture2D(src_tex, vec2(uv.x, - 1.0*v + uv.y) ) * 0.15;
+		sum += texture2D(src_tex, vec2(uv.x, + 0.0*v + uv.y) ) * 0.16;
+		sum += texture2D(src_tex, vec2(uv.x, + 1.0*v + uv.y) ) * 0.15;
+		sum += texture2D(src_tex, vec2(uv.x, + 2.0*v + uv.y) ) * 0.12;
+		sum += texture2D(src_tex, vec2(uv.x, + 3.0*v + uv.y) ) * 0.09;
+		sum += texture2D(src_tex, vec2(uv.x, + 4.0*v + uv.y) ) * 0.05;
+		gl_FragColor.xyz = sum.xyz/0.98;
+		gl_FragColor.a = 1.;
+		}
+	</script>
+
+	<script id="shader-fs-add-mouse-motion" type="x-shader/x-fragment">
+		uniform sampler2D sampler_fluid;
+
+		uniform vec2 aspect;
+		uniform vec2 mouse; // mouse coordinate
+		uniform vec2 mouseV; // mouse velocity
+
+
+		void main(void){
+		vec2 v = texture2D(sampler_fluid, uv).xz;
+
+		if(length(mouseV) > 0.){
+		v = mix(v, mouseV*2., filter(uv, mouse)*0.85);
+		}
+
+		float scale = 8.;
+
+		// first person left hand
+		if(length(mover0.zw) > 0.){
+		v = mix(v, mover0.zw*scale*texSize, filter(uv, mover0.xy)*0.85);
+		}
+		// first person right hand
+		if(length(mover1.zw) > 0.){
+		v = mix(v, mover1.zw*scale*texSize, filter(uv, mover1.xy)*0.85);
+		}
+		
+		// second person left hand
+		if(length(mover2.zw) > 0.){
+		v = mix(v, mover2.zw*scale*texSize, filter(uv, mover2.xy)*0.85);
+		}
+		// second person right hand
+		if(length(mover3.zw) > 0.){
+		v = mix(v, mover3.zw*scale*texSize, filter(uv, mover3.xy)*0.85);
+		}
+
+		// third person left hand
+		if(length(mover4.zw) > 0.){
+		v = mix(v, mover4.zw*scale*texSize, filter(uv, mover4.xy)*0.85);
+		}
+		// third person right hand
+		if(length(mover5.zw) > 0.){
+		v = mix(v, mover5.zw*scale*texSize, filter(uv, mover5.xy)*0.85);
+		}
+
+		// 4th person left hand
+		if(length(mover6.zw) > 0.){
+		v = mix(v, mover6.zw*scale*texSize, filter(uv, mover6.xy)*0.85);
+		}
+		// 4th person right hand
+		if(length(mover7.zw) > 0.){
+		v = mix(v, mover7.zw*scale*texSize, filter(uv, mover7.xy)*0.85);
+		}
+		
+		gl_FragColor.xz = v;
+		}
+
+	</script>
+
+	<script id="shader-fs-advect" type="x-shader/x-fragment">
+
+		uniform sampler2D sampler_fluid;
+
+		const float dt = .0005;
+
+		void main(void){
+		vec2 v = texture2D(sampler_fluid, uv).xz;
+
+		vec2 D = -texSize*vec2(v.x, v.y)*dt;
+
+		vec2 Df = floor(D),   Dd = D - Df;
+		vec2 uv = uv + Df*pixelSize;
+
+		vec2 uv0, uv1, uv2, uv3;
+
+		uv0 = uv + pixelSize*vec2(0.,0.);
+		uv1 = uv + pixelSize*vec2(1.,0.);
+		uv2 = uv + pixelSize*vec2(0.,1.);
+		uv3 = uv + pixelSize*vec2(1.,1.);
+
+		vec2 v0 = texture2D(sampler_fluid, uv0).xz;
+		vec2 v1 = texture2D(sampler_fluid, uv1).xz;
+		vec2 v2 = texture2D(sampler_fluid, uv2).xz;
+		vec2 v3 = texture2D(sampler_fluid, uv3).xz;
+
+		v = mix( mix( v0, v1, Dd.x), mix( v2, v3, Dd.x), Dd.y);
+
+		gl_FragColor.xz = v*(1.-border(uv, 1., texSize));
+		}
+
+	</script>
+
+	<script id="shader-fs-p" type="x-shader/x-fragment">
+		uniform sampler2D sampler_v;
+		uniform sampler2D sampler_p;
+		const float h = 1./1024.;
+
+		void main(void){
+
+		vec2 v = texture2D(sampler_v, uv).xz;
+		float v_x = texture2D(sampler_v, uv - vec2(1.,0.)*pixelSize).r;
+		float v_y = texture2D(sampler_v, uv - vec2(0.,1.)*pixelSize).b;
+
+		float n = texture2D(sampler_p, uv- pixelSize*vec2(0.,1.)).r;
+		float w = texture2D(sampler_p, uv + pixelSize*vec2(1.,0.)).r;
+		float s = texture2D(sampler_p, uv + pixelSize*vec2(0.,1.)).r;
+		float e = texture2D(sampler_p, uv - pixelSize*vec2(1.,0.)).r;
+
+		float p = ( n + w + s + e - (v.x - v_x + v.y - v_y)*h ) * .25;
+
+		gl_FragColor.r = p;
+		gl_FragColor.ba = vec2(0.); // unused
+		}
+	</script>
+
+	<script id="shader-fs-div" type="x-shader/x-fragment">
+		uniform sampler2D sampler_v;
+		uniform sampler2D sampler_p;
+
+		void main(void){
+		float p = texture2D(sampler_p, uv).r;
+		vec2 v = texture2D(sampler_v, uv).xz;
+		float p_x = texture2D(sampler_p, uv + vec2(1.,0.)*pixelSize).r;
+		float p_y = texture2D(sampler_p, uv + vec2(0.,1.)*pixelSize).r;
+
+		v -= (vec2(p_x, p_y)-p)*512.;
+
+		gl_FragColor.xz = v;
+		}
+	</script>
+
+	<script type="x-shader/x-vertex" id="shader-particle-renderer-vs">
+		attribute vec2 uv; // particle position lookup vector
+		uniform sampler2D sampler_prev;
+		uniform sampler2D sampler_blur;
+		uniform sampler2D sampler_particles; // particle positions in a float texture
+		uniform vec2 mouse;
+		uniform vec2 pixelSize;
+
+		vec2 gradient(sampler2D sampler, vec2 uv, vec2 d, vec4 selector){
+		vec4 dX = 0.5*texture2D(sampler, uv + vec2(1.,0.)*d) - 0.5*texture2D(sampler, uv - vec2(1.,0.)*d);
+		vec4 dY = 0.5*texture2D(sampler, uv + vec2(0.,1.)*d) - 0.5*texture2D(sampler, uv - vec2(0.,1.)*d);
+		return vec2( dot(dX, selector), dot(dY, selector) );
+		}
+
+		void main() {
+		gl_Position = (texture2D(sampler_particles, uv) - 0.5)*2.; // pass em flat
+		gl_Position.xy += gradient(sampler_blur, gl_Position.xy*0.5+0.5, pixelSize*3., vec4(1,-0.,0,0))*pixelSize*32.;
+
+		gl_Position.zw = vec2(0,1);
+		gl_PointSize = 1.;
+		}
+	</script>
+	<script type="x-shader/x-fragment" id="shader-particle-renderer-fs">
+		void main() {
+		gl_FragColor = vec4(1.0, 0.5, 0.166, 0.33);
+		}
+	</script>
+
+	<script type="text/javascript">
+		function getShader(gl, id) {
+			var shaderScript = document.getElementById(id);
+			var str = "";
+			var k = shaderScript.firstChild;
+			while (k) {
+				if (k.nodeType == 3)
+					str += k.textContent;
+				k = k.nextSibling;
+			}
+
+			var fsIncScript = document.getElementById("shader-fs-inc");
+			var incStr = "";
+			k = fsIncScript.firstChild;
+			while (k) {
+				if (k.nodeType == 3)
+					incStr += k.textContent;
+				k = k.nextSibling;
+			}
+
+			var shader;
+			if (shaderScript.type == "x-shader/x-fragment") {
+				str = incStr + str;
+				shader = gl.createShader(gl.FRAGMENT_SHADER);
+			} else if (shaderScript.type == "x-shader/x-vertex")
+				shader = gl.createShader(gl.VERTEX_SHADER);
+			else
+				return null;
+			gl.shaderSource(shader, str);
+			gl.compileShader(shader);
+			if (gl.getShaderParameter(shader, gl.COMPILE_STATUS) == 0)
+				alert("error compiling shader '" + id + "'\n\n" + gl.getShaderInfoLog(shader));
+			return shader;
+		}
+
+		window.requestAnimFrame = (function () {
+			return window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame
+		|| window.msRequestAnimationFrame || function (callback) {
+			window.setTimeout(callback, 1000 / 60);
+		};
+		})();
+
+		var gl;
+		var ext;
+
+		var prog_copy;
+		var prog_advance;
+		var prog_composite;
+		var prog_blur_horizontal;
+		var prog_blur_vertical;
+		var prog_black;
+		var prog_fluid_add_mouse_motion;
+		var prog_fluid_advect;
+		var prog_fluid_p;
+		var prog_fluid_div;
+		var prog_move_particles;
+		var prog_render_particles;
+		var prog_shape;
+		var prog_patch;
+
+		var FBO_main;
+		var FBO_main2;
+		var FBO_noise;
+		var FBO_blur;
+		var FBO_blur2;
+		var FBO_blur3;
+		var FBO_blur4;
+		var FBO_blur5;
+		var FBO_blur6;
+		var FBO_helper;
+		var FBO_helper2;
+		var FBO_helper3;
+		var FBO_helper4;
+		var FBO_helper5;
+		var FBO_helper6;
+		var FBO_fluid_v;
+		var FBO_fluid_p;
+		var FBO_fluid_store;
+		var FBO_fluid_backbuffer;
+		var FBO_particles; // particle positions in a texture
+		var FBO_particles2; // double buffer
+		var FBO_particle_projection; // particle render target for projection feedback effects
+		var FBO_skeletons;
+
+		var texture_main_n; // main, nearest pixel
+		var texture_main_l; // main, linear interpolated access on the same buffer
+		var texture_main2_n; // main double buffer, nearest
+		var texture_main2_l; // main double buffer, linear
+		var texture_blur; // full resolution blur result
+		var texture_blur2; // double blur
+		var texture_blur3; // quad blur
+		var texture_blur4; // use low resolutions wisely ;)
+		var texture_blur5;
+		var texture_blur6;
+		var texture_helper; // needed for multi-pass shader programs (2-pass Gaussian blur)
+		var texture_helper2; // (1/4 resolution )
+		var texture_helper3; // (1/16 resolution )
+		var texture_helper4; // (1/256 resolution )
+		var texture_helper5;
+		var texture_helper6;
+		var texture_noise_n; // nearest pixel access
+		var texture_noise_l; // linear interpolated
+		var texture_fluid_v; // velocities
+		var texture_fluid_p; // pressure
+		var texture_fluid_store;
+		var texture_fluid_backbuffer;
+		var texture_particles;
+		var texture_particles2;
+		var texture_particle_projection;
+		var texture_skeletons;
+
+		// main texture loop dimensions
+		var sizeX = 2048; // must be powers of 2
+		var sizeY = 1024;
+		var viewX = sizeX; // viewport size (ideally exactly the texture size)
+		var viewY = sizeY;
+
+		// particle positions will be stored in a texture of that size
+		var particlesWidth = 512;
+		var particlesHeight = 512;
+		var particleCount = particlesWidth * particlesHeight; // can also be set to lower than particlesWidth * particlesHeight
+
+		var useParticles = false;
+		var useProjectionFeedback = false; // rendering half a million points can slow things down significantly, don't render to texture if not needed
+		var useFluidSimulation = true; // the textures will be initialized anyway
+		var simScale = 16; // for better performance, the fluid simulation will be calculated for cells this times bigger than the main texture's pixels (powers of 2)
+		var maxGaussianBlurLevelUsed = 4; // not yet implemented, but doesn't cost much either. ;)
+
+		var startFullpage = true;
+		var renderParticlesOnly = false;
+
+		// don't change vars below
+		var aspectx = 1;
+		var aspecty = 1;
+
+		var frame = 0; // frame counter to be resetted every 1000ms
+		var framecount = 0; // not resetted
+		var mainBufferToggle = 1;
+		var halted = false;
+		var fps, fpsDisplayUpdateTimer;
+		var time, starttime = new Date().getTime();
+
+		var mouseX = 0.5;
+		var mouseY = 0.5;
+		var oldMouseX = 0;
+		var oldMouseY = 0;
+		var mouseDx = 0;
+		var mouseDy = 0;
+
+		var pendulum; // TODO: remove again?
+
+		// geometry
+		var particleBuffer, squareBuffer;
+
+		function updateApectRatio() {
+			aspectx = Math.max(1, viewX / viewY);
+			aspecty = Math.max(1, viewY / viewX);
+		}
+
+		function load() {
+			clearInterval(fpsDisplayUpdateTimer);
+			var c = document.getElementById("c");
+			try {
+				gl = c.getContext("experimental-webgl", {
+					depth: false
+				});
+			} catch (e) {
+			}
+			if (!gl) {
+				alert("Meh! Y u no support experimental WebGL !?!");
+				return;
+			}
+
+			["OES_texture_float", "OES_standard_derivatives", "OES_texture_float_linear"].forEach(function (name) {
+				console.log("check " + name);
+				try {
+					ext = gl.getExtension(name);
+				} catch (e) {
+					alert(e);
+				}
+				if (!ext) {
+					alert("Meh! Y u no support " + name + " !?!\n(Chrome 29 or Firefox 24 will do fine)");
+					return;
+				}
+				ext = false;
+			});
+
+			if (gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS) == 0) {
+				alert("Meh! Y u no support vertex shader textures !?!");
+				return;
+			}
+
+			document.onmousemove = function (evt) {
+				mouseX = evt.pageX / viewX;
+				mouseY = 1 - evt.pageY / viewY;
+				pendulum.x = (mouseX - 0.5) * aspectx;
+				pendulum.y = (0.5 - mouseY) * aspecty;
+				pendulum.z = .25; // depends upon camera settings
+			};
+
+			if (startFullpage) {
+				viewX = window.innerWidth;
+				viewY = window.innerHeight;
+			}
+
+			c.width = viewX;
+			c.height = viewY;
+			updateApectRatio();
+
+			prog_copy = createAndLinkProgram("shader-fs-copy");
+			prog_advance = createAndLinkProgram("shader-fs-advance");
+			prog_composite = createAndLinkProgram("shader-fs-composite");
+			prog_blur_horizontal = createAndLinkProgram("shader-fs-blur-horizontal");
+			prog_blur_vertical = createAndLinkProgram("shader-fs-blur-vertical");
+			prog_black = createAndLinkProgram("shader-fs-init");
+			prog_fluid_add_mouse_motion = createAndLinkProgram("shader-fs-add-mouse-motion");
+			prog_fluid_advect = createAndLinkProgram("shader-fs-advect");
+			prog_fluid_p = createAndLinkProgram("shader-fs-p");
+			prog_fluid_div = createAndLinkProgram("shader-fs-div");
+			prog_move_particles = createAndLinkProgram("shader-fs-move-particles");
+			prog_shape = createAndLinkProgram("shader-fs-shape", "shader-vs-shape");
+			prog_patch = createAndLinkProgram("shader-fs-patch", "shader-vs-patch");
+
+			triangleStripGeometry = {
+				vertices: new Float32Array([-1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0]),
+				texCoords: new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]),
+				vertexSize: 3,
+				vertexCount: 4,
+				type: gl.TRIANGLE_STRIP
+			};
+
+			createTexturedGeometryBuffer(triangleStripGeometry);
+
+			squareBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, squareBuffer);
+
+			var aPosLoc = gl.getAttribLocation(prog_advance, "aPos");
+			var aTexLoc = gl.getAttribLocation(prog_advance, "aTexCoord");
+
+			gl.enableVertexAttribArray(aPosLoc);
+			gl.enableVertexAttribArray(aTexLoc);
+
+			var verticesAndTexCoords = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1, // one square of a quad!
+0, 0, 1, 0, 0, 1, 1, 1] // hello texture, you be full
+);
+
+			gl.bufferData(gl.ARRAY_BUFFER, verticesAndTexCoords, gl.STATIC_DRAW);
+			gl.vertexAttribPointer(aPosLoc, 2, gl.FLOAT, gl.FALSE, 8, 0);
+			gl.vertexAttribPointer(aTexLoc, 2, gl.FLOAT, gl.FALSE, 8, 32);
+
+			var noisePixels = [], particles = [], particlesIdx = [];
+			var dX = 1 / particlesWidth;
+			var dY = 1 / particlesHeight;
+			for (var j = 0; j < sizeY; j++) {
+				for (var i = 0; i < sizeX; i++) {
+					noisePixels.push(Math.random(), Math.random(), Math.random(), 1);
+					if (i < particlesWidth && j < particlesHeight) {
+						particles.push(dX / 2 + i * dX, dY / 2 + j * dY, 0, 0); // initial particle positions, here: uniform distribution
+					}
+				}
+			}
+
+			for (var i = 0; i < particlesHeight; i++) {
+				for (var j = 0; j < particlesWidth; j++) {
+					particlesIdx.push(dX / 2 + j * dX, dY / 2 + i * dY); // coordinate lookup vectors (center of pixels)
+				}
+			}
+
+			FBO_main = gl.createFramebuffer();
+			FBO_main2 = gl.createFramebuffer();
+			var glPixels;
+			glPixels = new Float32Array(noisePixels);
+			texture_main_n = createAndBindTexture(glPixels, 1, FBO_main, gl.NEAREST);
+			texture_main2_n = createAndBindTexture(glPixels, 1, FBO_main2, gl.NEAREST);
+			glPixels = new Float32Array(noisePixels);
+			texture_main_l = createAndBindTexture(glPixels, 1, FBO_main, gl.LINEAR);
+			texture_main2_l = createAndBindTexture(glPixels, 1, FBO_main2, gl.LINEAR);
+
+			FBO_fluid_p = gl.createFramebuffer();
+			FBO_fluid_v = gl.createFramebuffer();
+			FBO_fluid_store = gl.createFramebuffer();
+			FBO_fluid_backbuffer = gl.createFramebuffer();
+			texture_fluid_v = createAndBindSimulationTexture(null, FBO_fluid_v);
+			texture_fluid_p = createAndBindSimulationTexture(null, FBO_fluid_p);
+			texture_fluid_store = createAndBindSimulationTexture(null, FBO_fluid_store);
+			texture_fluid_backbuffer = createAndBindSimulationTexture(null, FBO_fluid_backbuffer);
+
+			FBO_skeletons = gl.createFramebuffer();
+			texture_skeletons = createAndBindTexture(null, 1, FBO_skeletons, gl.NEAREST); // use blocky nearest pixel view
+
+			FBO_particle_projection = gl.createFramebuffer();
+			texture_particle_projection = createAndBindTexture(null, 1, FBO_particle_projection, gl.LINEAR);
+
+			FBO_helper = gl.createFramebuffer();
+			FBO_helper2 = gl.createFramebuffer();
+			FBO_helper3 = gl.createFramebuffer();
+			FBO_helper4 = gl.createFramebuffer();
+			FBO_helper5 = gl.createFramebuffer();
+			FBO_helper6 = gl.createFramebuffer();
+			texture_helper = createAndBindTexture(null, 1, FBO_helper, gl.NEAREST); // helper buffers for the two-pass Gaussian blur calculation basically
+			texture_helper2 = createAndBindTexture(null, 2, FBO_helper2, gl.NEAREST);
+			texture_helper3 = createAndBindTexture(null, 4, FBO_helper3, gl.NEAREST);
+			texture_helper4 = createAndBindTexture(null, 8, FBO_helper4, gl.NEAREST);
+			texture_helper5 = createAndBindTexture(null, 16, FBO_helper5, gl.NEAREST);
+			texture_helper6 = createAndBindTexture(null, 32, FBO_helper6, gl.NEAREST);
+
+			FBO_blur = gl.createFramebuffer();
+			FBO_blur2 = gl.createFramebuffer();
+			FBO_blur3 = gl.createFramebuffer();
+			FBO_blur4 = gl.createFramebuffer();
+			FBO_blur5 = gl.createFramebuffer();
+			FBO_blur6 = gl.createFramebuffer();
+			texture_blur = createAndBindTexture(null, 1, FBO_blur, gl.LINEAR);
+			texture_blur2 = createAndBindTexture(null, 2, FBO_blur2, gl.LINEAR);
+			texture_blur3 = createAndBindTexture(null, 4, FBO_blur3, gl.LINEAR);
+			texture_blur4 = createAndBindTexture(null, 8, FBO_blur4, gl.LINEAR);
+			texture_blur5 = createAndBindTexture(null, 16, FBO_blur5, gl.LINEAR);
+			texture_blur6 = createAndBindTexture(null, 32, FBO_blur6, gl.LINEAR);
+
+			FBO_noise = gl.createFramebuffer();
+			glPixels = new Float32Array(noisePixels);
+			texture_noise_n = createAndBindTexture(glPixels, 1, FBO_noise, gl.NEAREST);
+			texture_noise_l = createAndBindTexture(glPixels, 1, FBO_noise, gl.LINEAR);
+
+			FBO_particles = gl.createFramebuffer();
+			texture_particles = createAndBindParticleTexture(new Float32Array(particles), FBO_particles);
+
+			FBO_particles2 = gl.createFramebuffer();
+			texture_particles2 = createAndBindParticleTexture(new Float32Array(particles), FBO_particles2);
+
+			// lesson learned: the (frame) buffer location that we pass to the vertex shader has to be bound to the program before linking!
+
+			var aParticleLoc = 2; // no getAttributeLoc
+			prog_render_particles = createAndLinkParticleRenderer(aParticleLoc);
+
+			gl.useProgram(prog_render_particles);
+			gl.uniform1i(gl.getUniformLocation(prog_render_particles, "sampler_particles"), 0);
+
+			gl.enableVertexAttribArray(aParticleLoc);
+			particleBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(particlesIdx), gl.STATIC_DRAW);
+			gl.vertexAttribPointer(aParticleLoc, 2, gl.FLOAT, false, 0, 0);
+
+			gl.activeTexture(gl.TEXTURE2);
+			gl.bindTexture(gl.TEXTURE_2D, texture_blur);
+			gl.activeTexture(gl.TEXTURE3);
+			gl.bindTexture(gl.TEXTURE_2D, texture_blur2);
+			gl.activeTexture(gl.TEXTURE4);
+			gl.bindTexture(gl.TEXTURE_2D, texture_blur3);
+			gl.activeTexture(gl.TEXTURE5);
+			gl.bindTexture(gl.TEXTURE_2D, texture_blur4);
+			gl.activeTexture(gl.TEXTURE6);
+			gl.bindTexture(gl.TEXTURE_2D, texture_blur5);
+			gl.activeTexture(gl.TEXTURE7);
+			gl.bindTexture(gl.TEXTURE_2D, texture_blur6);
+			gl.activeTexture(gl.TEXTURE8);
+			gl.bindTexture(gl.TEXTURE_2D, texture_noise_l);
+			gl.activeTexture(gl.TEXTURE9);
+			gl.bindTexture(gl.TEXTURE_2D, texture_noise_n);
+			gl.activeTexture(gl.TEXTURE10);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+			gl.activeTexture(gl.TEXTURE11);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_p);
+			gl.activeTexture(gl.TEXTURE12);
+			gl.bindTexture(gl.TEXTURE_2D, texture_particles); // to be swapped anyways
+			gl.activeTexture(gl.TEXTURE13);
+			gl.bindTexture(gl.TEXTURE_2D, texture_particle_projection);
+			gl.activeTexture(gl.TEXTURE14);
+			gl.bindTexture(gl.TEXTURE_2D, texture_skeletons);
+
+			calculateBlurTexture();
+
+			fluidInit(FBO_fluid_v);
+			fluidInit(FBO_fluid_p);
+			fluidInit(FBO_fluid_store);
+			fluidInit(FBO_fluid_backbuffer);
+
+			fluidInit(FBO_skeletons);
+
+			fpsDisplayUpdateTimer = setInterval(fr, 1000);
+			time = new Date().getTime() - starttime;
+
+			gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+			gl.clearColor(0, 0, 0, 1);
+
+			pendulum = new Pendulum();
+
+			streakLength = 80; // number of lights
+			historyLength = 16; // number of memorized frames
+			pendulum.initStreaks(streakLength, historyLength);
+
+			pendulum.applyColor = pendulum.patterns["heart"];
+
+			anim();
+		}
+
+		function createTexturedGeometryBuffer(geometry) {
+			geometry.buffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, geometry.buffer);
+			geometry.aPosLoc = gl.getAttribLocation(prog_advance, "aPos"); // we could take any program here, they all use the same vertex shader
+			gl.enableVertexAttribArray(geometry.aPosLoc);
+			geometry.aTexLoc = gl.getAttribLocation(prog_advance, "aTexCoord");
+			gl.enableVertexAttribArray(geometry.aTexLoc);
+			geometry.texCoordOffset = geometry.vertices.byteLength;
+			gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoordOffset + geometry.texCoords.byteLength, gl.STATIC_DRAW);
+			gl.bufferSubData(gl.ARRAY_BUFFER, 0, geometry.vertices);
+			gl.bufferSubData(gl.ARRAY_BUFFER, geometry.texCoordOffset, geometry.texCoords);
+			setGeometryVertexAttribPointers(geometry);
+		}
+
+		function setGeometryVertexAttribPointers(geometry) {
+			gl.vertexAttribPointer(geometry.aPosLoc, geometry.vertexSize, gl.FLOAT, gl.FALSE, 0, 0);
+			gl.vertexAttribPointer(geometry.aTexLoc, 2, gl.FLOAT, gl.FALSE, 0, geometry.texCoordOffset);
+		}
+
+		function createAndLinkProgram(fsId, vsId) {
+			if (vsId == undefined) {
+				vsId = "shader-vs";
+			}
+			var program = gl.createProgram();
+			gl.attachShader(program, getShader(gl, vsId));
+			gl.attachShader(program, getShader(gl, fsId));
+			gl.linkProgram(program);
+			return program;
+		}
+
+		function createAndLinkParticleRenderer(aParticleLoc) {
+			var program = gl.createProgram();
+			gl.attachShader(program, getShader(gl, "shader-particle-renderer-vs"));
+			gl.attachShader(program, getShader(gl, "shader-particle-renderer-fs"));
+			gl.bindAttribLocation(program, aParticleLoc, "uv"); // can't use getAttribLocation later so we must bind before linking
+			gl.linkProgram(program);
+			return program;
+		}
+
+		function createAndBindTexture(glPixels, scale, fbo, filter) {
+			var texture = gl.createTexture();
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, sizeX / scale, sizeY / scale, 0, gl.RGBA, gl.FLOAT, glPixels);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+			return texture;
+		}
+
+		function createAndBindParticleTexture(glPixels, fbo) {
+			var texture = gl.createTexture();
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, particlesWidth, particlesHeight, 0, gl.RGBA, gl.FLOAT, glPixels);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+			return texture;
+		}
+
+		function createAndBindSimulationTexture(glPixels, fbo) {
+			var texture = gl.createTexture();
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, sizeX / simScale, sizeY / simScale, 0, gl.RGBA, gl.FLOAT, glPixels);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+			gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+			return texture;
+		}
+
+		function blacken(fbo) {
+			gl.viewport(0, 0, sizeX, sizeY);
+			gl.useProgram(prog_black);
+			renderAsTriangleStrip(fbo);
+		}
+
+		function fluidInit(fbo) {
+			gl.viewport(0, 0, sizeX / simScale, sizeY / simScale);
+			gl.useProgram(prog_black);
+			renderAsTriangleStrip(fbo);
+		}
+
+		function setUniforms(program) {
+			gl.uniform4f(gl.getUniformLocation(program, "rnd"), Math.random(), Math.random(), Math.random(), Math.random());
+			gl.uniform4f(gl.getUniformLocation(program, "rainbow"), rainbowR, rainbowG, rainbowB, 1);
+			gl.uniform2f(gl.getUniformLocation(program, "texSize"), sizeX, sizeY);
+			gl.uniform2f(gl.getUniformLocation(program, "pixelSize"), 1. / sizeX, 1. / sizeY);
+			gl.uniform2f(gl.getUniformLocation(program, "aspect"), aspectx, aspecty);
+			gl.uniform2f(gl.getUniformLocation(program, "mouse"), mouseX, mouseY);
+			gl.uniform2f(gl.getUniformLocation(program, "mouseV"), 0.5 * mouseDx / aspectx, 0.5 * mouseDy / aspecty);
+			gl.uniform1f(gl.getUniformLocation(program, "fps"), fps);
+			gl.uniform1f(gl.getUniformLocation(program, "time"), time);
+			gl.uniform1f(gl.getUniformLocation(program, "frame"), framecount);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_prev"), 0);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_prev_n"), 1);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_blur"), 2);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_blur2"), 3);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_blur3"), 4);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_blur4"), 5);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_blur5"), 6);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_blur6"), 7);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_noise"), 8);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_noise_n"), 9);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_fluid"), 10);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_fluid_p"), 11);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_particles"), 12);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_particle_projection"), 13);
+			gl.uniform1i(gl.getUniformLocation(program, "sampler_skeletons"), 14);
+
+			if (osc['/fad']) {
+				var fad = osc['/fad'];
+				gl.uniform4f(gl.getUniformLocation(program, "fader"), fad[0], fad[1], fad[2], 1);
+			} else {
+				gl.uniform4f(gl.getUniformLocation(program, "fader"), 1, 1, 1, 1);
+			}
+
+			gl.uniform4f(gl.getUniformLocation(program, "buttons"), buttons[0], buttons[1], buttons[2], buttons[3]);
+			gl.uniform4f(gl.getUniformLocation(program, "oldButtons"), oldButtons[0], oldButtons[1], oldButtons[2], oldButtons[3]);
+
+			// push it
+			var moverIndex = 0;
+			var bodyIndex = 0;
+
+			// project it
+			var p3d = {};
+			var p2d = {};
+
+			activeTrackingObjects.forEach(function (trackingObject) {
+
+				var skeleton = trackingObject.skeleton;
+				var body = trackingObject.body;
+
+				var x = 0.5 + (skeleton.joints['Head'].x - 0.5) * 0.5;
+				var y = 0.5 + (skeleton.joints['Head'].y - 0.5) * 0.5;
+				gl.uniform2f(gl.getUniformLocation(program, "head" + bodyIndex), x, y);
+
+				var col = colors[bodyIndex];
+				gl.uniform4f(gl.getUniformLocation(program, "col" + bodyIndex), col[0], col[1], col[2], 1);
+
+				bodyIndex++;
+
+				// left hand
+				project(skeleton.handLeft, p2d); // current projection
+				var x = 0.5 + (p2d.x - 0.5) * 0.5;
+				var y = 0.5 - (p2d.y - 0.5) * 0.5;
+
+				project(skeleton.handLeft.old, p2d); // previous projection
+				var prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+				var prevY = 0.5 - (p2d.y - 0.5) * 0.5;
+
+				var dx = (x - prevX); // difference = velocity
+				var dy = (y - prevY);
+				if (Math.abs(dx) > 0.2) {
+					dx = 0.2 * dx / Math.abs(dx);
+				}
+				if (Math.abs(dy) > 0.2) {
+					dy = 0.2 * dy / Math.abs(dy);
+				}
+
+				var state = body.handLeft.state;
+				gl.uniform4f(gl.getUniformLocation(program, "mover" + moverIndex), x, y, dx, dy);
+				gl.uniform1i(gl.getUniformLocation(program, "moverState" + moverIndex), state);
+
+				// left pendulum endpoint
+				var pendulum = trackingObject.skeleton.handLeft.pendulum;
+				project(pendulum.points[3], p2d)
+
+				x = 0.5 + (p2d.x - 0.5) * 0.5;
+				y = 0.5 + (p2d.y - 0.5) * 0.5;
+
+				var framesSinceLastRender = pendulum.frame - pendulum.lastRenderFrame;
+				var oldEndpoint = pendulum.endpointHistory[framesSinceLastRender];
+				if (oldEndpoint != null) {
+					project(oldEndpoint, p2d);
+					prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+					prevY = 0.5 + (p2d.y - 0.5) * 0.5;
+					dx = (x - prevX);
+					dy = (y - prevY);
+				} else {
+					// occurs only on the very first frame ^^
+					dx = 0;
+					dy = 0;
+				}
+
+				//gl.uniform4f(gl.getUniformLocation(program, "pendulum" + moverIndex), x, 1 - y, dx, -dy);
+
+				moverIndex++;
+
+				// right hand
+
+				project(skeleton.handRight, p2d);
+				x = 0.5 + (p2d.x - 0.5) * 0.5;
+				y = 0.5 - (p2d.y - 0.5) * 0.5;
+				project(skeleton.handRight.old, p2d);
+				prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+				prevY = 0.5 - (p2d.y - 0.5) * 0.5;
+				dx = (x - prevX);
+				dy = (y - prevY);
+				if (Math.abs(dx) > 0.2) {
+					dx = 0.2 * dx / Math.abs(dx);
+				}
+				if (Math.abs(dy) > 0.2) {
+					dy = 0.2 * dy / Math.abs(dy);
+				}
+				state = body.handRight.state;
+				gl.uniform4f(gl.getUniformLocation(program, "mover" + moverIndex), x, y, dx, dy);
+				gl.uniform1i(gl.getUniformLocation(program, "moverState" + moverIndex), state);
+				var pendulum = trackingObject.skeleton.handRight.pendulum;
+				project(pendulum.points[3], p2d)
+				x = 0.5 + (p2d.x - 0.5) * 0.5;
+				y = 0.5 + (p2d.y - 0.5) * 0.5;
+				var framesSinceLastRender = pendulum.frame - pendulum.lastRenderFrame;
+				var oldEndpoint = pendulum.endpointHistory[framesSinceLastRender];
+				if (oldEndpoint != null) {
+					project(oldEndpoint, p2d);
+					prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+					prevY = 0.5 + (p2d.y - 0.5) * 0.5;
+					dx = (x - prevX);
+					dy = (y - prevY);
+				} else {
+					dx = 0;
+					dy = 0;
+				}
+				gl.uniform4f(gl.getUniformLocation(program, "pendulum" + moverIndex), x, 1 - y, dx, -dy);
+
+				moverIndex++;
+			});
+
+			// init untracked players
+			for (var index = moverIndex; index < 8; index++) {
+				gl.uniform4f(gl.getUniformLocation(program, "col" + bodyIndex), 0, 0, 0, 0);
+				bodyIndex++;
+
+				gl.uniform4f(gl.getUniformLocation(program, "mover" + moverIndex), 0, 0, 0, 0);
+				gl.uniform1i(gl.getUniformLocation(program, "moverState" + moverIndex), 0);
+				gl.uniform4f(gl.getUniformLocation(program, "pendulum" + moverIndex), 0, 0, 0, 0);
+				moverIndex++;
+
+				gl.uniform4f(gl.getUniformLocation(program, "mover" + moverIndex), 0, 0, 0, 0);
+				gl.uniform1i(gl.getUniformLocation(program, "moverState" + moverIndex), 0);
+				gl.uniform4f(gl.getUniformLocation(program, "pendulum" + moverIndex), 0, 0, 0, 0);
+				moverIndex++
+			}
+		}
+
+		function useGeometry(geometry) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, geometry.buffer);
+			setGeometryVertexAttribPointers(geometry);
+		}
+
+		function renderGeometry(geometry, targetFBO) {
+			useGeometry(geometry);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+			gl.drawArrays(geometry.type, 0, geometry.vertexCount);
+			gl.flush();
+		}
+
+		function renderAsTriangleStrip(targetFBO) {
+			renderGeometry(triangleStripGeometry, targetFBO);
+		}
+
+		function renderParticles(targetFBO) {
+			gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer);
+
+			if (targetFBO == null) {
+				gl.viewport(0, 0, viewX, viewY);
+			} else {
+				gl.viewport(0, 0, sizeX, sizeY);
+			}
+
+			gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO);
+			gl.useProgram(prog_render_particles);
+
+			gl.activeTexture(gl.TEXTURE12);
+			if (mainBufferToggle < 0) {
+				gl.bindTexture(gl.TEXTURE_2D, texture_particles2);
+			} else {
+				gl.bindTexture(gl.TEXTURE_2D, texture_particles);
+			}
+
+			gl.uniform1i(gl.getUniformLocation(prog_render_particles, "sampler_particles"), 12); // input for the vertex shader
+			gl.uniform2f(gl.getUniformLocation(prog_render_particles, "pixelSize"), 1. / sizeX, 1. / sizeY);
+			gl.uniform2f(gl.getUniformLocation(prog_render_particles, "aspect"), aspectx, aspecty);
+			gl.uniform1i(gl.getUniformLocation(prog_render_particles, "sampler_prev"), 0);
+			gl.uniform1i(gl.getUniformLocation(prog_render_particles, "sampler_prev_n"), 1);
+			gl.uniform1i(gl.getUniformLocation(prog_render_particles, "sampler_blur"), 2);
+
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+			gl.enable(gl.BLEND);
+			gl.drawArrays(gl.POINTS, 0, particleCount);
+			gl.disable(gl.BLEND);
+
+			gl.flush();
+		}
+
+		function calculateBlurTextures(texture_source) {
+			calculateBlurTexture(texture_source, texture_blur, FBO_blur, texture_helper, FBO_helper, 1);
+			calculateBlurTexture(texture_blur, texture_blur2, FBO_blur2, texture_helper2, FBO_helper2, 2);
+			calculateBlurTexture(texture_blur2, texture_blur3, FBO_blur3, texture_helper3, FBO_helper3, 4);
+			calculateBlurTexture(texture_blur3, texture_blur4, FBO_blur4, texture_helper4, FBO_helper4, 8);
+			calculateBlurTexture(texture_blur4, texture_blur5, FBO_blur5, texture_helper5, FBO_helper5, 16);
+			calculateBlurTexture(texture_blur5, texture_blur6, FBO_blur6, texture_helper6, FBO_helper6, 32);
+		}
+
+		function calculateBlurTexture(sourceTex, targetTex, targetFBO, helperTex, helperFBO, scale) {
+			// copy source
+			gl.viewport(0, 0, sizeX / scale, sizeY / scale);
+			gl.useProgram(prog_copy);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+			renderAsTriangleStrip(targetFBO);
+
+			// blur vertically
+			gl.viewport(0, 0, sizeX / scale, sizeY / scale);
+			gl.useProgram(prog_blur_vertical);
+			gl.uniform2f(gl.getUniformLocation(prog_blur_vertical, "pixelSize"), scale / sizeX, scale / sizeY);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, targetTex);
+			renderAsTriangleStrip(helperFBO);
+
+			// blur horizontally
+			gl.viewport(0, 0, sizeX / scale, sizeY / scale);
+			gl.useProgram(prog_blur_horizontal);
+			gl.uniform2f(gl.getUniformLocation(prog_blur_horizontal, "pixelSize"), scale / sizeX, scale / sizeY);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, helperTex);
+			renderAsTriangleStrip(targetFBO);
+
+		}
+
+		function stepParticles() {
+			gl.viewport(0, 0, particlesWidth, particlesHeight);
+			gl.useProgram(prog_move_particles);
+			gl.uniform4f(gl.getUniformLocation(prog_move_particles, "rnd"), Math.random(), Math.random(), Math.random(), Math.random());
+			gl.uniform1f(gl.getUniformLocation(prog_move_particles, "frame"), framecount);
+			gl.uniform2f(gl.getUniformLocation(prog_move_particles, "texSize"), sizeX, sizeY);
+			gl.uniform2f(gl.getUniformLocation(prog_move_particles, "mouse"), mouseX, mouseY);
+			gl.uniform2f(gl.getUniformLocation(prog_move_particles, "mouseV"), mouseDx, mouseDy);
+			gl.uniform2f(gl.getUniformLocation(prog_move_particles, "pixelSize"), 1. / sizeX, 1. / sizeY);
+			gl.uniform2f(gl.getUniformLocation(prog_move_particles, "scale"), 2. / simScale / particlesWidth, 2. / simScale / particlesHeight);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_prev"), 0);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_prev_n"), 1);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_blur"), 2);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_blur2"), 3);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_blur3"), 4);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_blur4"), 5);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_blur5"), 6);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_blur6"), 7);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_noise"), 8);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_noise_n"), 9);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_fluid"), 10);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_fluid_p"), 11);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_particles"), 12);
+			gl.uniform1i(gl.getUniformLocation(prog_move_particles, "sampler_particle_projection"), 13);
+			if (mainBufferToggle > 0) {
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+				gl.activeTexture(gl.TEXTURE12);
+				gl.bindTexture(gl.TEXTURE_2D, texture_particles);
+				renderAsTriangleStrip(FBO_particles2)
+			} else {
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+				gl.activeTexture(gl.TEXTURE12);
+				gl.bindTexture(gl.TEXTURE_2D, texture_particles2);
+				renderAsTriangleStrip(FBO_particles);
+			}
+		}
+
+		function fluidSimulationStep() {
+			addMouseMotion();
+			advect();
+			diffuse();
+		}
+
+		var colors = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1]]; // red green blue yellow magenta cyan
+
+		function addMouseMotion() {
+			gl.viewport(0, 0, (sizeX / simScale), (sizeY / simScale));
+			gl.useProgram(prog_fluid_add_mouse_motion);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "aspect"), aspectx, aspecty);
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "mouse"), mouseX, mouseY);
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "mouseV"), mouseDx / aspectx, mouseDy / aspecty);
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "pixelSize"), 1. / (sizeX / simScale), 1. / (sizeY / simScale));
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "texSize"), (sizeX / simScale), (sizeY / simScale));
+
+
+			// push it
+			var moverIndex = 0;
+			var bodyIndex = 0;
+
+			// project it
+			var p3d = {};
+			var p2d = {};
+
+			activeTrackingObjects.forEach(function (trackingObject) {
+
+				var skeleton = trackingObject.skeleton;
+				var body = trackingObject.body;
+
+				project(skeleton.head, p2d);
+				var x = 0.5 + (p2d.x - 0.5) * 0.5;
+				var y = 0.5 - (p2d.y - 0.5) * 0.5;
+				gl.uniform2f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "head" + bodyIndex), x, y);
+
+				var col = colors[bodyIndex];
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "col" + bodyIndex), col[0], col[1], col[2], 1);
+
+				bodyIndex++;
+
+
+				// left hand
+				project(skeleton.handLeft, p2d); // current projection
+				var x = 0.5 + (p2d.x - 0.5) * 0.5;
+				var y = 0.5 - (p2d.y - 0.5) * 0.5;
+
+				project(skeleton.handLeft.old, p2d); // previous projection
+				var prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+				var prevY = 0.5 - (p2d.y - 0.5) * 0.5;
+
+				var dx = (x - prevX); // difference = velocity
+				var dy = (y - prevY);
+				if (Math.abs(dx) > 0.2) {
+					dx = 0.2 * dx / Math.abs(dx);
+				}
+				if (Math.abs(dy) > 0.2) {
+					dy = 0.2 * dy / Math.abs(dy);
+				}
+				var state = body.handLeft.state;
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "mover" + moverIndex), x, y, dx, dy);
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_add_mouse_motion, "moverState" + moverIndex), state);
+
+				// left pendulum endpoint
+				var pendulum = trackingObject.skeleton.handLeft.pendulum;
+				project(pendulum.points[3], p2d)
+
+				x = 0.5 + (p2d.x - 0.5) * 0.5;
+				y = 0.5 + (p2d.y - 0.5) * 0.5;
+
+				var framesSinceLastRender = pendulum.frame - pendulum.lastRenderFrame;
+				var oldEndpoint = pendulum.endpointHistory[framesSinceLastRender];
+				if (oldEndpoint != null) {
+					project(oldEndpoint, p2d);
+					prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+					prevY = 0.5 + (p2d.y - 0.5) * 0.5;
+					dx = (x - prevX);
+					dy = (y - prevY);
+				} else {
+					// occurs only on the very first frame ^^
+					dx = 0;
+					dy = 0;
+				}
+
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "pendulum" + moverIndex), x, 1 - y, dx, -dy);
+
+				moverIndex++;
+
+				// right hand
+
+				project(skeleton.handRight, p2d);
+				x = 0.5 + (p2d.x - 0.5) * 0.5;
+				y = 0.5 - (p2d.y - 0.5) * 0.5;
+				project(skeleton.handRight.old, p2d);
+				prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+				prevY = 0.5 - (p2d.y - 0.5) * 0.5;
+				dx = (x - prevX);
+				dy = (y - prevY);
+				if (Math.abs(dx) > 0.2) {
+					dx = 0.2 * dx / Math.abs(dx);
+				}
+				if (Math.abs(dy) > 0.2) {
+					dy = 0.2 * dy / Math.abs(dy);
+				}
+				state = body.handRight.state;
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "mover" + moverIndex), x, y, dx, dy);
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_add_mouse_motion, "moverState" + moverIndex), state);
+				var pendulum = trackingObject.skeleton.handRight.pendulum;
+				project(pendulum.points[3], p2d)
+				x = 0.5 + (p2d.x - 0.5) * 0.5;
+				y = 0.5 + (p2d.y - 0.5) * 0.5;
+				var framesSinceLastRender = pendulum.frame - pendulum.lastRenderFrame;
+				var oldEndpoint = pendulum.endpointHistory[framesSinceLastRender];
+				if (oldEndpoint != null) {
+					project(oldEndpoint, p2d);
+					prevX = 0.5 + (p2d.x - 0.5) * 0.5;
+					prevY = 0.5 + (p2d.y - 0.5) * 0.5;
+					dx = (x - prevX);
+					dy = (y - prevY);
+				} else {
+					dx = 0;
+					dy = 0;
+				}
+
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "pendulum" + moverIndex), x, 1 - y, dx, -dy);
+
+				moverIndex++;
+			});
+
+			// init untracked players
+			for (var index = moverIndex; index < 12; index++) {
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "mover" + moverIndex), 0, 0, 0, 0);
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_add_mouse_motion, "moverState" + moverIndex), 0);
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "pendulum" + moverIndex), 0, 0, 0, 0);
+				moverIndex++;
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "mover" + moverIndex), 0, 0, 0, 0);
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_add_mouse_motion, "moverState" + moverIndex), 0);
+				gl.uniform4f(gl.getUniformLocation(prog_fluid_add_mouse_motion, "pendulum" + moverIndex), 0, 0, 0, 0);
+				moverIndex++
+			}
+
+			renderAsTriangleStrip(FBO_fluid_backbuffer);
+		}
+
+		function advect() {
+			gl.viewport(0, 0, (sizeX / simScale), (sizeY / simScale));
+			gl.useProgram(prog_fluid_advect);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_backbuffer);
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_advect, "pixelSize"), 1. / (sizeX / simScale), 1. / (sizeY / simScale));
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_advect, "texSize"), (sizeX / simScale), (sizeY / simScale));
+			renderAsTriangleStrip(FBO_fluid_v);
+		}
+
+		function diffuse() {
+			for (var i = 0; i < 8; i++) {
+				gl.viewport(0, 0, (sizeX / simScale), (sizeY / simScale));
+				gl.useProgram(prog_fluid_p);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, texture_fluid_p);
+				gl.uniform2f(gl.getUniformLocation(prog_fluid_p, "texSize"), (sizeX / simScale), (sizeY / simScale));
+				gl.uniform2f(gl.getUniformLocation(prog_fluid_p, "pixelSize"), 1. / (sizeX / simScale), 1. / (sizeY / simScale));
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_p, "sampler_v"), 0);
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_p, "sampler_p"), 1);
+				renderAsTriangleStrip(FBO_fluid_backbuffer);
+
+				gl.viewport(0, 0, (sizeX / simScale), (sizeY / simScale));
+				gl.useProgram(prog_fluid_p);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, texture_fluid_backbuffer);
+				gl.uniform2f(gl.getUniformLocation(prog_fluid_p, "texSize"), (sizeX / simScale), (sizeY / simScale));
+				gl.uniform2f(gl.getUniformLocation(prog_fluid_p, "pixelSize"), 1. / (sizeX / simScale), 1. / (sizeY / simScale));
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_p, "sampler_v"), 0);
+				gl.uniform1i(gl.getUniformLocation(prog_fluid_p, "sampler_p"), 1);
+				renderAsTriangleStrip(FBO_fluid_p);
+			}
+
+			gl.viewport(0, 0, (sizeX / simScale), (sizeY / simScale));
+			gl.useProgram(prog_fluid_div);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_v);
+			gl.activeTexture(gl.TEXTURE1);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_p);
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_div, "texSize"), (sizeX / simScale), (sizeY / simScale));
+			gl.uniform2f(gl.getUniformLocation(prog_fluid_div, "pixelSize"), 1. / (sizeX / simScale), 1. / (sizeY / simScale));
+			gl.uniform1i(gl.getUniformLocation(prog_fluid_div, "sampler_v"), 0);
+			gl.uniform1i(gl.getUniformLocation(prog_fluid_div, "sampler_p"), 1);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_fluid_backbuffer);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			gl.flush();
+
+			gl.viewport(0, 0, (sizeX / simScale), (sizeY / simScale));
+			gl.useProgram(prog_copy);
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, texture_fluid_backbuffer);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_fluid_v);
+			gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+			gl.flush();
+		}
+
+		// main texture feedback warp
+		function advance() {
+			gl.viewport(0, 0, sizeX, sizeY);
+			gl.useProgram(prog_advance);
+			setUniforms(prog_advance);
+			if (mainBufferToggle > 0) {
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main_l); // interpolated input
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main_n); // "nearest" input
+				renderAsTriangleStrip(FBO_main2);
+			} else {
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main2_l); // interpolated
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main2_n); // "nearest"
+				renderAsTriangleStrip(FBO_main);
+			}
+			mainBufferToggle = -mainBufferToggle;
+		}
+
+		function composite() {
+			gl.viewport(0, 0, viewX, viewY);
+			gl.useProgram(prog_composite);
+			setUniforms(prog_composite);
+			if (mainBufferToggle < 0) {
+				gl.activeTexture(gl.TEXTURE12);
+				gl.bindTexture(gl.TEXTURE_2D, texture_particles);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main_l);
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main_n);
+			} else {
+				gl.activeTexture(gl.TEXTURE12);
+				gl.bindTexture(gl.TEXTURE_2D, texture_particles2);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main2_l);
+				gl.activeTexture(gl.TEXTURE1);
+				gl.bindTexture(gl.TEXTURE_2D, texture_main2_n);
+			}
+			renderAsTriangleStrip(null);
+		}
+
+		var rainbowR, rainbowG, rainbowB, w = Math.PI * 2 / 3;
+		var buttons = [0, 0, 0, 0], oldButtons = [0, 0, 0, 0];
+
+		function anim() {
+			requestAnimationFrame(anim);
+
+			time = new Date().getTime() - starttime;
+
+			var t = time / 150;
+
+			rainbowR = 0.5 + 0.5 * Math.sin(t);
+			rainbowG = 0.5 + 0.5 * Math.sin(t + w);
+			rainbowB = 0.5 + 0.5 * Math.sin(t - w);
+
+			if (oldMouseX != 0 && oldMouseY != 0) {
+				mouseDx = (mouseX - oldMouseX) * viewX; //???
+				mouseDy = (mouseY - oldMouseY) * viewY;
+			}
+
+			if (osc['/btn']) {
+			    buttons = osc['/btn'];
+			} else {
+			    buttons = [0, 0, 0, 0];
+			}
+
+			if (!halted) {
+				blacken(FBO_skeletons);
+				updateKinectSkeletons();
+				drawKinectSkeletons(FBO_skeletons);
+
+				if (useProjectionFeedback)
+					renderParticles(FBO_particle_projection);
+
+				if (useFluidSimulation)
+					fluidSimulationStep();
+
+				if (useParticles)
+					stepParticles();
+
+				advance();
+
+				var srcTex = (mainBufferToggle < 0) ? texture_main2_l : texture_main_l;
+
+				calculateBlurTextures(srcTex);
+
+				frame++;
+				framecount++;
+			}
+
+			if (renderParticlesOnly)
+				renderParticles(null);
+			else
+				composite();
+
+			//pendulum.renderSupportPoints(null);
+			//pendulum.renderSpringPoints(null);
+
+			var feedback_FBO = (mainBufferToggle > 0) ? FBO_main : FBO_main2;
+
+			//pendulum.renderStrips(feedback_FBO);
+
+			//drawKinectSkeletons(null);
+
+			drawKinectSkeletonPendulums(feedback_FBO);
+
+			frames++;
+
+			oldMouseX = mouseX;
+			oldMouseY = mouseY;
+		    oldButtons = buttons;
+		}
+
+		function fr() { // updates every second
+			document.getElementById("fps").textContent = frame;
+			frame = 0; // reset the frame counter
+		}
+
+		function goFull(cb) {
+			if (cb.checked) {
+				viewX = window.innerWidth;
+				viewY = window.innerHeight;
+			} else {
+				viewX = sizeX;
+				viewY = sizeY;
+			}
+			c.width = viewX;
+			c.height = viewY;
+		}
+
+		function switchRenderer(particlesOnly) {
+			renderParticlesOnly = particlesOnly;
+		}
+	</script>
+
+
+	<!-- description box logic-->
+	<script>
+		var hidden = false;
+		function hide() {
+			hidden = !hidden;
+			document.getElementById("desc").style.setProperty('visibility', hidden ? 'hidden' : 'visible');
+		}
+	</script>
+
+	<style type="text/css">
+		body {
+			background-color: #000000;
+			color: #FFFFFF;
+		}
+
+		#c {
+			position: absolute;
+			top: 0;
+			left: 0;
+			z-index: -1;
+		}
+
+		a {
+			color: #FFFFFF;
+			font-weight: bold;
+		}
+
+		#desc {
+			background-color: rgba(0, 0, 0, 0.2);
+		}
+	</style>
+</head>
+<body onload="load()" ondblclick="hide()">
+	<div id="desc">
+		Kinect v2 Skeletal Tracking SignalR Client with WebGL Turing Pattern Fluid
+		<br>
+		fps: <span id="fps"></span>
+	</div>
+	<canvas id="c"></canvas>
+</body>
+</html>
